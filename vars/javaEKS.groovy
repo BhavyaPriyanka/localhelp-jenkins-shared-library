@@ -130,12 +130,19 @@ stage('Deploy to K8') {
 
              echo "========= Get Bastion Private IP =========="
 
-            BASTION_IP=\$(aws ec2 describe-instances \
-                --filters \
-                  "Name=tag:Name,Values=localhelp-dev-bastion" \
-                  "Name=instance-state-name,Values=running" \
-                --query 'Reservations[0].Instances[0].PrivateIpAddress' \
-                --output text)
+                        BASTION_IP=$(aws ec2 describe-instances \
+                            --filters \
+                            "Name=tag:Name,Values=localhelp-dev-bastion" \
+                            "Name=instance-state-name,Values=running" \
+                            --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+                            --output text)
+
+                        echo "Bastion IP: $BASTION_IP"
+
+                        if [ -z "$BASTION_IP" ] || [ "$BASTION_IP" = "None" ]; then
+                            echo "ERROR: Bastion instance not found"
+                            exit 1
+                        fi
 
             echo "Bastion IP: \$BASTION_IP"
 

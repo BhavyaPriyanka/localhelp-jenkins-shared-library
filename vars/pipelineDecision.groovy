@@ -9,7 +9,7 @@ def decidePipeline(Map configMap){
         break
 
         case "nodeJSEKS":
-                javaVM(configMap)
+                nodeJSEKS(configMap)
         break
 
         default:

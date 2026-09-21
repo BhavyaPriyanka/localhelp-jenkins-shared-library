@@ -128,23 +128,36 @@ stage('Deploy to K8') {
         sh """
             set -e
 
-            echo "========= Copy Helm Chart to Bastion =========="
+             echo "========= Get Bastion Private IP =========="
+
+            BASTION_IP=\$(aws ec2 describe-instances \
+                --filters \
+                  "Name=tag:Name,Values=localhelp-dev-bastion" \
+                  "Name=instance-state-name,Values=running" \
+                --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+                --output text)
+
+            echo "Bastion IP: \$BASTION_IP"
+
+            
+
+             echo "========= Copy Helm Chart to Bastion =========="
 
             ssh -i /home/ec2-user/.ssh/jenkins_bastion \
               -o StrictHostKeyChecking=no \
-              ec2-user@10.0.1.109 \
+              ec2-user@\$BASTION_IP \
               'rm -rf /tmp/backend-helm'
 
             scp -i /home/ec2-user/.ssh/jenkins_bastion \
               -o StrictHostKeyChecking=no \
               -r helm \
-              ec2-user@10.0.1.109:/tmp/backend-helm
+              ec2-user@\$BASTION_IP:/tmp/backend-helm
 
             echo "========= Deploy Backend to EKS =========="
 
-            ssh -i /home/ec2-user/.ssh/jenkins_bastion \
+             ssh -i /home/ec2-user/.ssh/jenkins_bastion \
               -o StrictHostKeyChecking=no \
-              ec2-user@10.0.1.109 \
+              ec2-user@\$BASTION_IP \
               "VERSION='${version}' bash -s" <<'REMOTE_SCRIPT'
 
                 set -e

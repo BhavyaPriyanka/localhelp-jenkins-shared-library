@@ -110,124 +110,123 @@ def call(Map configMap) {
                     """
                 }
             }
+stage('Deploy to K8') {
+    steps {
+        sh """
+            set -e
 
-            stage('Deploy to K8') {
-                steps {
-                    sh """
-                        set -e
+            echo "========= GET BASTION PRIVATE IP =========="
 
-                        echo "========= GET BASTION PRIVATE IP =========="
+            BASTION_IP=\\\$(aws ec2 describe-instances \
+                --filters \
+                  "Name=tag:Name,Values=localhelp-dev-bastion" \
+                  "Name=instance-state-name,Values=running" \
+                --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+                --output text)
 
-                        BASTION_IP=\\$(aws ec2 describe-instances \
-                            --filters \
-                              "Name=tag:Name,Values=localhelp-dev-bastion" \
-                              "Name=instance-state-name,Values=running" \
-                            --query 'Reservations[0].Instances[0].PrivateIpAddress' \
-                            --output text)
+            echo "Bastion IP: \\\$BASTION_IP"
 
-                        echo "Bastion IP: \\$BASTION_IP"
+            if [ -z "\\\$BASTION_IP" ] || [ "\\\$BASTION_IP" = "None" ]; then
+                echo "ERROR: Bastion instance not found"
+                exit 1
+            fi
 
-                        if [ -z "\\$BASTION_IP" ] || [ "\\$BASTION_IP" = "None" ]; then
-                            echo "ERROR: Bastion instance not found"
-                            exit 1
-                        fi
+            SSH_OPTS="-i /home/ec2-user/.ssh/jenkins_bastion -o StrictHostKeyChecking=no"
 
-                        SSH_OPTS="-i /home/ec2-user/.ssh/jenkins_bastion -o StrictHostKeyChecking=no"
+            echo "========= COPY HELM CHART TO BASTION =========="
 
-                        echo "========= COPY HELM CHART TO BASTION =========="
+            ssh \\\$SSH_OPTS \
+                ec2-user@\\\$BASTION_IP \
+                'rm -rf /tmp/frontend-helm'
 
-                        ssh \\$SSH_OPTS \
-                            ec2-user@\\$BASTION_IP \
-                            'rm -rf /tmp/frontend-helm'
+            scp \\\$SSH_OPTS \
+                -r helm \
+                ec2-user@\\\$BASTION_IP:/tmp/frontend-helm
 
-                        scp \\$SSH_OPTS \
-                            -r helm \
-                            ec2-user@\\$BASTION_IP:/tmp/frontend-helm
+            echo "========= DEPLOY FRONTEND TO EKS =========="
 
-                        echo "========= DEPLOY FRONTEND TO EKS =========="
+            ssh \\\$SSH_OPTS \
+                ec2-user@\\\$BASTION_IP \
+                "IMAGE_VERSION='${version}' bash -s" <<'REMOTE_SCRIPT'
 
-                        ssh \\$SSH_OPTS \
-                            ec2-user@\\$BASTION_IP \
-                            "IMAGE_VERSION='${version}' bash -s" <<'REMOTE_SCRIPT'
+                set -e
 
-                            set -e
+                echo "========= CHECK KUBERNETES NODES =========="
 
-                            echo "========= CHECK KUBERNETES NODES =========="
+                kubectl get nodes
 
-                            kubectl get nodes
+                echo "========= GET FRONTEND TARGET GROUP ARN =========="
 
-                            echo "========= GET FRONTEND TARGET GROUP ARN =========="
+                TARGET_GROUP_ARN=\\\$(aws elbv2 describe-target-groups \
+                    --region us-east-1 \
+                    --names localhelp-dev-frontend \
+                    --query 'TargetGroups[0].TargetGroupArn' \
+                    --output text)
 
-                            TARGET_GROUP_ARN=\$(aws elbv2 describe-target-groups \
-                                --region us-east-1 \
-                                --names localhelp-dev-frontend \
-                                --query 'TargetGroups[0].TargetGroupArn' \
-                                --output text)
+                echo "TARGET GROUP ARN = \\\$TARGET_GROUP_ARN"
 
-                            echo "TARGET GROUP ARN = \$TARGET_GROUP_ARN"
+                if [ -z "\\\$TARGET_GROUP_ARN" ] || [ "\\\$TARGET_GROUP_ARN" = "None" ]; then
+                    echo "ERROR: Frontend target group not found"
+                    exit 1
+                fi
 
-                            if [ -z "\$TARGET_GROUP_ARN" ] || [ "\$TARGET_GROUP_ARN" = "None" ]; then
-                                echo "ERROR: Frontend target group not found"
-                                exit 1
-                            fi
+                echo "========= DEPLOY FRONTEND USING HELM =========="
 
-                            echo "========= DEPLOY FRONTEND USING HELM =========="
+                cd /tmp/frontend-helm
 
-                            cd /tmp/frontend-helm
+                echo "========= CURRENT HELM VALUES =========="
 
-                            echo "========= CURRENT HELM VALUES =========="
+                cat values.yaml
 
-                            cat values.yaml
+                echo "========= HELM UPGRADE / INSTALL =========="
 
-                            echo "========= HELM UPGRADE / INSTALL =========="
+                helm upgrade --install frontend . \
+                    --namespace localhelp \
+                    --create-namespace \
+                    --set deployment.imageVersion="\\\$IMAGE_VERSION" \
+                    --set targetGroup.arn="\\\$TARGET_GROUP_ARN"
 
-                            helm upgrade --install frontend . \
-                                --namespace localhelp \
-                                --create-namespace \
-                                --set deployment.imageVersion="\$IMAGE_VERSION" \
-                                --set targetGroup.arn="\$TARGET_GROUP_ARN"
+                echo "========= HELM RELEASE STATUS =========="
 
-                            echo "========= HELM RELEASE STATUS =========="
+                helm status frontend \
+                    --namespace localhelp
 
-                            helm status frontend \
-                                --namespace localhelp
+                echo "========= CHECK FRONTEND DEPLOYMENT =========="
 
-                            echo "========= CHECK FRONTEND DEPLOYMENT =========="
+                kubectl get deployment frontend \
+                    -n localhelp
 
-                            kubectl get deployment frontend \
-                                -n localhelp
+                echo "========= CHECK FRONTEND PODS =========="
 
-                            echo "========= CHECK FRONTEND PODS =========="
+                kubectl get pods \
+                    -n localhelp \
+                    -o wide
 
-                            kubectl get pods \
-                                -n localhelp \
-                                -o wide
+                echo "========= WAIT FOR FRONTEND ROLLOUT =========="
 
-                            echo "========= WAIT FOR FRONTEND ROLLOUT =========="
+                kubectl rollout status \
+                    deployment/frontend \
+                    -n localhelp \
+                    --timeout=5m
 
-                            kubectl rollout status \
-                                deployment/frontend \
-                                -n localhelp \
-                                --timeout=5m
+                echo "========= FRONTEND ROLLOUT SUCCESSFUL =========="
 
-                            echo "========= FRONTEND ROLLOUT SUCCESSFUL =========="
+                kubectl get pods \
+                    -n localhelp \
+                    -l app=frontend \
+                    -o wide
 
-                            kubectl get pods \
-                                -n localhelp \
-                                -l app=frontend \
-                                -o wide
+                echo "========= FRONTEND SERVICE =========="
 
-                            echo "========= FRONTEND SERVICE =========="
+                kubectl get svc frontend \
+                    -n localhelp
 
-                            kubectl get svc frontend \
-                                -n localhelp
-
-                            echo "========= FRONTEND DEPLOYMENT COMPLETE =========="
+                echo "========= FRONTEND DEPLOYMENT COMPLETE =========="
 
 REMOTE_SCRIPT
-                    """
-                }
-            }
+        """
+    }
+}
 
             stage('Upload Artifact to S3') {
                 steps {

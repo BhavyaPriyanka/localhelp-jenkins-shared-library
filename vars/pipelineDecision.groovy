@@ -1,7 +1,7 @@
 #!groovy
 
 def decidePipeline(Map configMap){
-    type = configMap.get("type")
+    def type = configMap.get("type")
 
     switch(type){
         case "javaEKS":
@@ -15,6 +15,5 @@ def decidePipeline(Map configMap){
         default:
             error "type is not matched"
         break
-
     }
 }

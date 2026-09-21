@@ -54,34 +54,37 @@ def call(Map configMap) {
                 }
             }
 
-            stage('Prepare Artifact') {
-                steps {
-                    script {
-                        version = env.BUILD_NUMBER
-                    }
+           stage('Prepare Artifact') {
+    steps {
+        script {
+            version = env.BUILD_NUMBER
+        }
 
-                    sh '''
-                        set -e
+        sh '''
+            set -e
 
-                        echo "===== PREPARING FRONTEND ARTIFACT ====="
+            echo "===== PREPARING FRONTEND ARTIFACT ====="
 
-                        zip -r frontend-${BUILD_NUMBER}.zip build
+            zip -r frontend-${BUILD_NUMBER}.zip build
 
-                        echo "===== ARTIFACT CREATED ====="
+            echo "===== ARTIFACT CREATED ====="
 
-                        ls -lh frontend-${BUILD_NUMBER}.zip
-                                    sh '''
-    echo "===== DOCKER BUILD DEBUG ====="
-    pwd
-    ls -la
-    echo "===== localhelp.conf ====="
-    cat localhelp.conf
-    echo "===== Dockerfile ====="
-    cat Dockerfile
-    echo "============================="
-                    '''
-                }
-            }
+            ls -lh frontend-${BUILD_NUMBER}.zip
+
+            echo "===== DOCKER BUILD DEBUG ====="
+            pwd
+            ls -la
+
+            echo "===== localhelp.conf ====="
+            cat localhelp.conf
+
+            echo "===== Dockerfile ====="
+            cat Dockerfile
+
+            echo "============================="
+        '''
+    }
+}
 
 
             stage('Docker Build and Push to ECR') {
@@ -100,9 +103,9 @@ def call(Map configMap) {
 
                         echo "===== BUILDING FRONTEND DOCKER IMAGE ====="
 
-                        docker build  --no-cache\
-                            -t ${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${version} \
-                            .
+                        docker build --no-cache \
+    -t ${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${version} \
+    .
 
                         echo "===== DOCKER IMAGE CREATED ====="
 

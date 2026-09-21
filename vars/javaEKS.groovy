@@ -1,267 +1,261 @@
-def call(Map configMap){
-    
+def call(Map configMap) {
+
     def version
     def artifactId
     def groupId
 
-pipeline {
-    agent {
-        label 'AGENT-1'
-    }
+    pipeline {
+        agent {
+            label 'AGENT-1'
+        }
 
-    options {
-        timeout(time: 30, unit: 'MINUTES')
-        disableConcurrentBuilds()
-    }
+        options {
+            timeout(time: 30, unit: 'MINUTES')
+            disableConcurrentBuilds()
+        }
 
-    environment {
-        nexusUrl = pipelineGlobals.nexusUrl()
-        account_id = pipelineGlobals.account_id()
-        region = pipelineGlobals.region()
-        component = configMap.get("component")
-        project = configMap.get("project")
-    }
+        environment {
+            nexusUrl  = pipelineGlobals.nexusUrl()
+            account_id = pipelineGlobals.account_id()
+            region    = pipelineGlobals.region()
+            component = configMap.get("component")
+            project   = configMap.get("project")
+        }
 
-    stages {
+        stages {
 
-        stage('Install Dependencies') {
-            steps {
-        sh '''
-            mvn dependency:resolve
-            ls -la ~/.m2
-        '''
-    }
-}
-
-stage('Set Maven Version from Git Tag') {
-    steps {
-        script {
-            def gitTag = sh(
-                script: "git describe --tags --exact-match 2>/dev/null || true",
-                returnStdout: true
-            ).trim()
-
-            if (!gitTag) {
-                error("Build must be triggered from a Git tag, e.g. v1.9.0")
+            stage('Install Dependencies') {
+                steps {
+                    sh '''
+                        mvn dependency:resolve
+                        ls -la ~/.m2
+                    '''
+                }
             }
 
-            version = gitTag.replaceFirst(/^v/, '')
+            stage('Set Maven Version from Git Tag') {
+                steps {
+                    script {
+                        def gitTag = sh(
+                            script: "git describe --tags --exact-match 2>/dev/null || true",
+                            returnStdout: true
+                        ).trim()
 
-            echo "===== GIT RELEASE VERSION ====="
-            echo "Git Tag : ${gitTag}"
-            echo "Version : ${version}"
+                        if (!gitTag) {
+                            error("Build must be triggered from a Git tag, e.g. v1.9.0")
+                        }
 
-            sh """
-                mvn versions:set \
-                  -DnewVersion=${version} \
-                  -DgenerateBackupPoms=false
-            """
+                        version = gitTag.replaceFirst(/^v/, '')
 
-            echo "POM version updated to ${version}"
-        }
-    }
-}
+                        echo "===== GIT RELEASE VERSION ====="
+                        echo "Git Tag : ${gitTag}"
+                        echo "Version : ${version}"
 
-stage('Read Maven Information') {
-    steps {
-        script {
-            artifactId = sh(
-                script: "mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout",
-                returnStdout: true
-            ).trim()
+                        sh """
+                            mvn versions:set \
+                              -DnewVersion=${version} \
+                              -DgenerateBackupPoms=false
+                        """
 
-            groupId = sh(
-                script: "mvn help:evaluate -Dexpression=project.groupId -q -DforceStdout",
-                returnStdout: true
-            ).trim()
-
-            echo "Group Id     : ${groupId}"
-            echo "Artifact Id  : ${artifactId}"
-            echo "Maven Version: ${version}"
-        }
-    }
-}
-
-
-
-        stage('Build') {
-            steps {
-                sh '''
-                    echo "===== BUILDING APPLICATION ====="
-
-                    mvn -q clean package -DskipTests
-
-                    echo "===== GENERATED ARTIFACT ====="
-                    ls -ltr target
-                '''
+                        echo "POM version updated to ${version}"
+                    }
+                }
             }
-        }
 
-        stage('Docker Build and Push to ECR') {
-            steps {
-                sh """
-                    echo "===== LOGIN TO ECR ====="
+            stage('Read Maven Information') {
+                steps {
+                    script {
+                        artifactId = sh(
+                            script: "mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout",
+                            returnStdout: true
+                        ).trim()
 
-                    aws ecr get-login-password --region ${region} | \
-                    docker login --username AWS --password-stdin \
-                    ${account_id}.dkr.ecr.${region}.amazonaws.com
+                        groupId = sh(
+                            script: "mvn help:evaluate -Dexpression=project.groupId -q -DforceStdout",
+                            returnStdout: true
+                        ).trim()
 
-                    echo "===== BUILDING DOCKER IMAGE ====="
-
-                    docker build \
-                      -t ${account_id}.dkr.ecr.${region}.amazonaws.com/${component}:${version} .
-
-                    echo "===== DOCKER IMAGE CREATED ====="
-
-                    docker images | grep ${component}
-
-                    echo "===== PUSHING IMAGE TO ECR ====="
-
-                    docker push \
-                      ${account_id}.dkr.ecr.${region}.amazonaws.com/${component}:${version}
-                """
+                        echo "Group Id     : ${groupId}"
+                        echo "Artifact Id  : ${artifactId}"
+                        echo "Maven Version: ${version}"
+                    }
+                }
             }
-        }
 
-stage('Deploy to K8') {
-    steps {
-        sh """
-            set -e
+            stage('Build') {
+                steps {
+                    sh '''
+                        echo "===== BUILDING APPLICATION ====="
 
-             echo "========= Get Bastion Private IP =========="
+                        mvn -q clean package -DskipTests
 
-                        BASTION_IP=$(aws ec2 describe-instances \
+                        echo "===== GENERATED ARTIFACT ====="
+                        ls -ltr target
+                    '''
+                }
+            }
+
+            stage('Docker Build and Push to ECR') {
+                steps {
+                    sh """
+                        echo "===== LOGIN TO ECR ====="
+
+                        aws ecr get-login-password --region ${region} | \
+                        docker login --username AWS --password-stdin \
+                        ${account_id}.dkr.ecr.${region}.amazonaws.com
+
+                        echo "===== BUILDING DOCKER IMAGE ====="
+
+                        docker build \
+                          -t ${account_id}.dkr.ecr.${region}.amazonaws.com/${component}:${version} .
+
+                        echo "===== DOCKER IMAGE CREATED ====="
+
+                        docker images | grep ${component}
+
+                        echo "===== PUSHING IMAGE TO ECR ====="
+
+                        docker push \
+                          ${account_id}.dkr.ecr.${region}.amazonaws.com/${component}:${version}
+                    """
+                }
+            }
+
+            stage('Deploy to K8') {
+                steps {
+                    sh """
+                        set -e
+
+                        echo "========= Get Bastion Private IP =========="
+
+                        BASTION_IP=\$(aws ec2 describe-instances \
                             --filters \
-                            "Name=tag:Name,Values=localhelp-dev-bastion" \
-                            "Name=instance-state-name,Values=running" \
+                              "Name=tag:Name,Values=localhelp-dev-bastion" \
+                              "Name=instance-state-name,Values=running" \
                             --query 'Reservations[0].Instances[0].PrivateIpAddress' \
                             --output text)
 
-                        echo "Bastion IP: $BASTION_IP"
+                        echo "Bastion IP: \$BASTION_IP"
 
-                        if [ -z "$BASTION_IP" ] || [ "$BASTION_IP" = "None" ]; then
+                        if [ -z "\$BASTION_IP" ] || [ "\$BASTION_IP" = "None" ]; then
                             echo "ERROR: Bastion instance not found"
                             exit 1
                         fi
 
-            echo "Bastion IP: \$BASTION_IP"
+                        SSH_OPTS="-i /home/ec2-user/.ssh/jenkins_bastion -o StrictHostKeyChecking=no"
 
-            
+                        echo "========= Copy Helm Chart to Bastion =========="
 
-             echo "========= Copy Helm Chart to Bastion =========="
+                        ssh \$SSH_OPTS \
+                          ec2-user@\$BASTION_IP \
+                          'rm -rf /tmp/backend-helm'
 
-            ssh -i /home/ec2-user/.ssh/jenkins_bastion \
-              -o StrictHostKeyChecking=no \
-              ec2-user@\$BASTION_IP \
-              'rm -rf /tmp/backend-helm'
+                        scp \$SSH_OPTS \
+                          -r helm \
+                          ec2-user@\$BASTION_IP:/tmp/backend-helm
 
-            scp -i /home/ec2-user/.ssh/jenkins_bastion \
-              -o StrictHostKeyChecking=no \
-              -r helm \
-              ec2-user@\$BASTION_IP:/tmp/backend-helm
+                        echo "========= Deploy Backend to EKS =========="
 
-            echo "========= Deploy Backend to EKS =========="
+                        ssh \$SSH_OPTS \
+                          ec2-user@\$BASTION_IP \
+                          "VERSION='${version}' bash -s" <<'REMOTE_SCRIPT'
 
-             ssh -i /home/ec2-user/.ssh/jenkins_bastion \
-              -o StrictHostKeyChecking=no \
-              ec2-user@\$BASTION_IP \
-              "VERSION='${version}' bash -s" <<'REMOTE_SCRIPT'
+                            set -e
 
-                set -e
+                            echo "========= Check Kubernetes Nodes =========="
 
-                echo "========= Check Kubernetes Nodes =========="
-                kubectl get nodes
+                            kubectl get nodes
 
-                echo "========= Set Image Version =========="
+                            echo "========= Set Image Version =========="
 
-                cd /tmp/backend-helm
+                            cd /tmp/backend-helm
 
-                sed -i "s/IMAGE_VERSION/\${VERSION}/g" values.yaml
+                            sed -i "s/IMAGE_VERSION/\${VERSION}/g" values.yaml
 
-                echo "========= Helm Upgrade / Install =========="
+                            echo "========= Helm Upgrade / Install =========="
 
-                helm upgrade --install backend . \
-                  --namespace localhelp \
-                  --create-namespace
+                            helm upgrade --install backend . \
+                              --namespace localhelp \
+                              --create-namespace
 
-                echo "========= Helm Release =========="
+                            echo "========= Helm Release =========="
 
-                helm status backend \
-                  --namespace localhelp
+                            helm status backend \
+                              --namespace localhelp
 
-                echo "========= CHECK DEPLOYMENT =========="
+                            echo "========= CHECK DEPLOYMENT =========="
 
-                kubectl get deployment backend \
-                  -n localhelp
+                            kubectl get deployment backend \
+                              -n localhelp
 
-                echo "========= CHECK PODS =========="
+                            echo "========= CHECK PODS =========="
 
-                kubectl get pods \
-                  -n localhelp \
-                  -o wide
+                            kubectl get pods \
+                              -n localhelp \
+                              -o wide
 
-                echo "========= WAIT FOR ROLLOUT =========="
+                            echo "========= WAIT FOR ROLLOUT =========="
 
-                kubectl rollout status deployment/backend \
-                  -n localhelp \
-                  --timeout=5m
+                            kubectl rollout status deployment/backend \
+                              -n localhelp \
+                              --timeout=5m
 
-                echo "========= FINAL POD STATUS =========="
+                            echo "========= FINAL POD STATUS =========="
 
-                kubectl get pods \
-                  -n localhelp \
-                  -o wide
+                            kubectl get pods \
+                              -n localhelp \
+                              -o wide
 
-                echo "========= BACKEND SERVICE =========="
+                            echo "========= BACKEND SERVICE =========="
 
-                kubectl get svc backend \
-                  -n localhelp
+                            kubectl get svc backend \
+                              -n localhelp
 
-                echo "========= DEPLOYMENT COMPLETE =========="
+                            echo "========= DEPLOYMENT COMPLETE =========="
 
 REMOTE_SCRIPT
-        """
-    }
-}
+                    """
+                }
+            }
 
-        stage('Upload Artifact to S3') {
-            steps {
-                sh """
-                    echo "===== UPLOADING ARTIFACTS TO S3 ====="
+            stage('Upload Artifact to S3') {
+                steps {
+                    sh """
+                        echo "===== UPLOADING ARTIFACTS TO S3 ====="
 
-                    aws s3 cp \
-                        target/${artifactId}-${version}.jar \
-                        s3://localhelp-backend-artifacts/backend/${version}/${artifactId}-${version}.jar
+                        aws s3 cp \
+                            target/${artifactId}-${version}.jar \
+                            s3://localhelp-backend-artifacts/backend/${version}/${artifactId}-${version}.jar
 
-                    aws s3 cp \
-                        db/init.sql \
-                        s3://localhelp-backend-artifacts/backend/${version}/init.sql
+                        aws s3 cp \
+                            db/init.sql \
+                            s3://localhelp-backend-artifacts/backend/${version}/init.sql
 
-                    echo "===== S3 UPLOAD COMPLETED ====="
+                        echo "===== S3 UPLOAD COMPLETED ====="
 
-                    echo "===== S3 ARTIFACTS ====="
+                        echo "===== S3 ARTIFACTS ====="
 
-                    aws s3 ls \
-                        s3://localhelp-backend-artifacts/backend/${version}/
-                """
+                        aws s3 ls \
+                            s3://localhelp-backend-artifacts/backend/${version}/
+                    """
+                }
+            }
+        }
+
+        post {
+
+            always {
+                echo "===== CLEANING WORKSPACE ====="
+                deleteDir()
+            }
+
+            success {
+                echo "Pipeline completed successfully."
+            }
+
+            failure {
+                echo "Pipeline failed."
             }
         }
     }
-
-    post {
-
-        always {
-            echo "===== CLEANING WORKSPACE ====="
-            deleteDir()
-        }
-
-        success {
-            echo "Pipeline completed successfully."
-        }
-
-        failure {
-            echo "Pipeline failed."
-        }
-    }
-}
 }

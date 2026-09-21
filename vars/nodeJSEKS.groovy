@@ -1,331 +1,278 @@
-def call(Map configMap){
+def call(Map configMap) {
+
     def version
 
-pipeline {
+    pipeline {
 
-    agent {
-        label 'AGENT-1'
-    }
-
-    options {
-        timeout(time: 30, unit: 'MINUTES')
-        disableConcurrentBuilds()
-    }
-
-    environment {
-        // nexusUrl   = pipelineGlobals.nexusUrl()
-        APP_NAME   = configMap.get("component")
-        region     = pipelineGlobals.region()
-        account_id = pipelineGlobals.account_id()
-        ECR_REPO   = configMap.get("component")
-    }
-
-    stages {
-
-        stage('Install Dependencies') {
-            steps {
-                sh '''
-                    set -e
-
-                    echo "===== INSTALLING NPM DEPENDENCIES ====="
-
-                    npm ci
-
-                    echo "===== DEPENDENCIES INSTALLED ====="
-                '''
-            }
+        agent {
+            label 'AGENT-1'
         }
 
-        stage('Build React Application') {
-            steps {
-                sh '''
-                    set -e
-
-                    echo "===== BUILDING REACT APPLICATION ====="
-
-                    npm run build
-
-                    echo "===== BUILD DIRECTORY ====="
-
-                    ls -ltr build
-
-                    echo "===== REACT BUILD COMPLETED ====="
-                '''
-            }
+        options {
+            timeout(time: 30, unit: 'MINUTES')
+            disableConcurrentBuilds()
         }
 
-        stage('Prepare Artifact') {
-            steps {
-                script {
-                    version = env.BUILD_NUMBER
+        environment {
+            APP_NAME   = configMap.get("component")
+            region     = pipelineGlobals.region()
+            account_id = pipelineGlobals.account_id()
+            ECR_REPO   = configMap.get("component")
+        }
+
+        stages {
+
+            stage('Install Dependencies') {
+                steps {
+                    sh '''
+                        set -e
+
+                        echo "===== INSTALLING NPM DEPENDENCIES ====="
+
+                        npm ci
+
+                        echo "===== DEPENDENCIES INSTALLED ====="
+                    '''
                 }
-
-                sh '''
-                    set -e
-
-                    echo "===== PREPARING FRONTEND ARTIFACT ====="
-
-                    zip -r frontend-${BUILD_NUMBER}.zip build
-
-                    echo "===== ARTIFACT CREATED ====="
-
-                    ls -lh frontend-${BUILD_NUMBER}.zip
-                '''
             }
-        }
 
-        stage('Docker Build and Push to ECR') {
-            steps {
-                sh """
-                    set -e
+            stage('Build React Application') {
+                steps {
+                    sh '''
+                        set -e
 
-                    echo "===== LOGIN TO ECR ====="
+                        echo "===== BUILDING REACT APPLICATION ====="
 
-                    aws ecr get-login-password \
-                        --region ${region} | \
-                    docker login \
-                        --username AWS \
-                        --password-stdin \
-                        ${account_id}.dkr.ecr.${region}.amazonaws.com
+                        npm run build
 
+                        echo "===== BUILD DIRECTORY ====="
 
-                    echo "===== BUILDING FRONTEND DOCKER IMAGE ====="
+                        ls -ltr build
 
-                    docker build \
-                        -t ${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${version} \
-                        .
-
-
-                    echo "===== DOCKER IMAGE CREATED ====="
-
-                    docker images | grep ${ECR_REPO}
-
-
-                    echo "===== PUSHING IMAGE TO ECR ====="
-
-                    docker push \
-                        ${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${version}
-
-
-                    echo "===== IMAGE PUSH COMPLETED ====="
-
-                    echo "IMAGE:"
-                    echo "${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${version}"
-                """
+                        echo "===== REACT BUILD COMPLETED ====="
+                    '''
+                }
             }
-        }
 
-                stage('Deploy to K8') {
-    steps {
-        sh """
-            set -e
+            stage('Prepare Artifact') {
+                steps {
+                    script {
+                        version = env.BUILD_NUMBER
+                    }
 
-            echo "========= GET BASTION PRIVATE IP =========="
+                    sh '''
+                        set -e
 
-            BASTION_IP=\\$(aws ec2 describe-instances \
-                --filters \
-                  "Name=tag:Name,Values=localhelp-dev-bastion" \
-                  "Name=instance-state-name,Values=running" \
-                --query 'Reservations[0].Instances[0].PrivateIpAddress' \
-                --output text)
+                        echo "===== PREPARING FRONTEND ARTIFACT ====="
 
-            echo "Bastion IP: \\$BASTION_IP"
+                        zip -r frontend-${BUILD_NUMBER}.zip build
 
-            if [ -z "\\$BASTION_IP" ] || [ "\\$BASTION_IP" = "None" ]; then
-                echo "ERROR: Bastion instance not found"
-                exit 1
-            fi
+                        echo "===== ARTIFACT CREATED ====="
 
-            SSH_OPTS="-i /home/ec2-user/.ssh/jenkins_bastion -o StrictHostKeyChecking=no"
+                        ls -lh frontend-${BUILD_NUMBER}.zip
+                    '''
+                }
+            }
 
-            echo "========= COPY HELM CHART TO BASTION =========="
+            stage('Docker Build and Push to ECR') {
+                steps {
+                    sh """
+                        set -e
 
-            ssh \\$SSH_OPTS \
-                ec2-user@\\$BASTION_IP \
-                'rm -rf /tmp/frontend-helm'
+                        echo "===== LOGIN TO ECR ====="
 
-            scp \\$SSH_OPTS \
-                -r helm \
-                ec2-user@\\$BASTION_IP:/tmp/frontend-helm
+                        aws ecr get-login-password \
+                            --region ${region} | \
+                        docker login \
+                            --username AWS \
+                            --password-stdin \
+                            ${account_id}.dkr.ecr.${region}.amazonaws.com
 
-            echo "========= DEPLOY FRONTEND TO EKS =========="
+                        echo "===== BUILDING FRONTEND DOCKER IMAGE ====="
 
-            ssh \\$SSH_OPTS \
-                ec2-user@\\$BASTION_IP \
-                "IMAGE_VERSION='${version}' bash -s" <<'REMOTE_SCRIPT'
+                        docker build \
+                            -t ${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${version} \
+                            .
 
-                set -e
+                        echo "===== DOCKER IMAGE CREATED ====="
 
-                echo "========= CHECK KUBERNETES NODES =========="
+                        docker images | grep ${ECR_REPO}
 
-                kubectl get nodes
+                        echo "===== PUSHING IMAGE TO ECR ====="
 
-                echo "========= GET FRONTEND TARGET GROUP ARN =========="
+                        docker push \
+                            ${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${version}
 
-                TARGET_GROUP_ARN=\\$(aws elbv2 describe-target-groups \
-                    --region us-east-1 \
-                    --names localhelp-dev-frontend \
-                    --query 'TargetGroups[0].TargetGroupArn' \
-                    --output text)
+                        echo "===== IMAGE PUSH COMPLETED ====="
 
-                echo "TARGET GROUP ARN = \\$TARGET_GROUP_ARN"
+                        echo "IMAGE:"
+                        echo "${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${version}"
+                    """
+                }
+            }
 
-                if [ -z "\\$TARGET_GROUP_ARN" ] || [ "\\$TARGET_GROUP_ARN" = "None" ]; then
-                    echo "ERROR: Frontend target group not found"
-                    exit 1
-                fi
+            stage('Deploy to K8') {
+                steps {
+                    sh """
+                        set -e
 
-                echo "========= DEPLOY FRONTEND USING HELM =========="
+                        echo "========= GET BASTION PRIVATE IP =========="
 
-                cd /tmp/frontend-helm
+                        BASTION_IP=\\$(aws ec2 describe-instances \
+                            --filters \
+                              "Name=tag:Name,Values=localhelp-dev-bastion" \
+                              "Name=instance-state-name,Values=running" \
+                            --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+                            --output text)
 
-                echo "========= CURRENT HELM VALUES =========="
+                        echo "Bastion IP: \\$BASTION_IP"
 
-                cat values.yaml
+                        if [ -z "\\$BASTION_IP" ] || [ "\\$BASTION_IP" = "None" ]; then
+                            echo "ERROR: Bastion instance not found"
+                            exit 1
+                        fi
 
-                echo "========= HELM UPGRADE / INSTALL =========="
+                        SSH_OPTS="-i /home/ec2-user/.ssh/jenkins_bastion -o StrictHostKeyChecking=no"
 
-                helm upgrade --install frontend . \
-                    --namespace localhelp \
-                    --create-namespace \
-                    --set deployment.imageVersion="\\${IMAGE_VERSION}" \
-                    --set targetGroup.arn="\\${TARGET_GROUP_ARN}"
+                        echo "========= COPY HELM CHART TO BASTION =========="
 
-                echo "========= HELM RELEASE STATUS =========="
+                        ssh \\$SSH_OPTS \
+                            ec2-user@\\$BASTION_IP \
+                            'rm -rf /tmp/frontend-helm'
 
-                helm status frontend \
-                    --namespace localhelp
+                        scp \\$SSH_OPTS \
+                            -r helm \
+                            ec2-user@\\$BASTION_IP:/tmp/frontend-helm
 
-                echo "========= CHECK FRONTEND DEPLOYMENT =========="
+                        echo "========= DEPLOY FRONTEND TO EKS =========="
 
-                kubectl get deployment frontend \
-                    -n localhelp
+                        ssh \\$SSH_OPTS \
+                            ec2-user@\\$BASTION_IP \
+                            "IMAGE_VERSION='${version}' bash -s" <<'REMOTE_SCRIPT'
 
-                echo "========= CHECK FRONTEND PODS =========="
+                            set -e
 
-                kubectl get pods \
-                    -n localhelp \
-                    -o wide
+                            echo "========= CHECK KUBERNETES NODES =========="
 
-                echo "========= WAIT FOR FRONTEND ROLLOUT =========="
+                            kubectl get nodes
 
-                kubectl rollout status \
-                    deployment/frontend \
-                    -n localhelp \
-                    --timeout=5m
+                            echo "========= GET FRONTEND TARGET GROUP ARN =========="
 
-                echo "========= FRONTEND ROLLOUT SUCCESSFUL =========="
+                            TARGET_GROUP_ARN=\$(aws elbv2 describe-target-groups \
+                                --region us-east-1 \
+                                --names localhelp-dev-frontend \
+                                --query 'TargetGroups[0].TargetGroupArn' \
+                                --output text)
 
-                kubectl get pods \
-                    -n localhelp \
-                    -l app=frontend \
-                    -o wide
+                            echo "TARGET GROUP ARN = \$TARGET_GROUP_ARN"
 
-                echo "========= FRONTEND SERVICE =========="
+                            if [ -z "\$TARGET_GROUP_ARN" ] || [ "\$TARGET_GROUP_ARN" = "None" ]; then
+                                echo "ERROR: Frontend target group not found"
+                                exit 1
+                            fi
 
-                kubectl get svc frontend \
-                    -n localhelp
+                            echo "========= DEPLOY FRONTEND USING HELM =========="
 
-                echo "========= FRONTEND DEPLOYMENT COMPLETE =========="
+                            cd /tmp/frontend-helm
+
+                            echo "========= CURRENT HELM VALUES =========="
+
+                            cat values.yaml
+
+                            echo "========= HELM UPGRADE / INSTALL =========="
+
+                            helm upgrade --install frontend . \
+                                --namespace localhelp \
+                                --create-namespace \
+                                --set deployment.imageVersion="\$IMAGE_VERSION" \
+                                --set targetGroup.arn="\$TARGET_GROUP_ARN"
+
+                            echo "========= HELM RELEASE STATUS =========="
+
+                            helm status frontend \
+                                --namespace localhelp
+
+                            echo "========= CHECK FRONTEND DEPLOYMENT =========="
+
+                            kubectl get deployment frontend \
+                                -n localhelp
+
+                            echo "========= CHECK FRONTEND PODS =========="
+
+                            kubectl get pods \
+                                -n localhelp \
+                                -o wide
+
+                            echo "========= WAIT FOR FRONTEND ROLLOUT =========="
+
+                            kubectl rollout status \
+                                deployment/frontend \
+                                -n localhelp \
+                                --timeout=5m
+
+                            echo "========= FRONTEND ROLLOUT SUCCESSFUL =========="
+
+                            kubectl get pods \
+                                -n localhelp \
+                                -l app=frontend \
+                                -o wide
+
+                            echo "========= FRONTEND SERVICE =========="
+
+                            kubectl get svc frontend \
+                                -n localhelp
+
+                            echo "========= FRONTEND DEPLOYMENT COMPLETE =========="
 
 REMOTE_SCRIPT
-        """
-    }
-}
-        stage('Upload Artifact to S3') {
-            steps {
-                sh """
-                    set -e
+                    """
+                }
+            }
 
-                    echo "===== UPLOADING FRONTEND ARTIFACT TO S3 ====="
+            stage('Upload Artifact to S3') {
+                steps {
+                    sh """
+                        set -e
 
-                    aws s3 cp \
-                        frontend-${version}.zip \
-                        s3://localhelp-frontend-artifacts/frontend/${version}/frontend-${version}.zip
+                        echo "===== UPLOADING FRONTEND ARTIFACT TO S3 ====="
 
+                        aws s3 cp \
+                            frontend-${version}.zip \
+                            s3://localhelp-frontend-artifacts/frontend/${version}/frontend-${version}.zip
 
-                    echo "===== S3 UPLOAD COMPLETED ====="
+                        echo "===== S3 UPLOAD COMPLETED ====="
 
+                        echo "===== VERIFYING S3 ARTIFACT ====="
 
-                    echo "===== VERIFYING S3 ARTIFACT ====="
+                        aws s3 ls \
+                            s3://localhelp-frontend-artifacts/frontend/${version}/
 
-                    aws s3 ls \
-                        s3://localhelp-frontend-artifacts/frontend/${version}/
+                        echo "===== FRONTEND ARTIFACT UPLOAD SUCCESSFUL ====="
+                    """
+                }
+            }
+        }
 
+        post {
 
-                    echo "===== FRONTEND ARTIFACT UPLOAD SUCCESSFUL ====="
-                """
+            always {
+                echo "===== CLEANING WORKSPACE ====="
+                deleteDir()
+            }
+
+            success {
+                echo "======================================"
+                echo "Frontend Pipeline Successful"
+                echo "Version: ${version}"
+                echo "======================================"
+            }
+
+            failure {
+                echo "======================================"
+                echo "Frontend Pipeline Failed"
+                echo "Version: ${version}"
+                echo "======================================"
             }
         }
     }
-
-    /*
-    stage('Upload Artifact to Nexus') {
-        steps {
-            script {
-
-                nexusArtifactUploader(
-                    nexusVersion: 'nexus3',
-                    protocol: 'http',
-                    nexusUrl: nexusUrl,
-                    repository: 'frontend',
-                    credentialsId: 'nexus-auth',
-
-                    groupId: 'com.localhelp',
-                    version: version,
-
-                    artifacts: [
-                        [
-                            artifactId: APP_NAME,
-                            classifier: '',
-                            file: "frontend-${version}.zip",
-                            type: 'zip'
-                        ]
-                    ]
-                )
-
-            }
-        }
-    }
-
-    stage('Trigger Frontend Deployment') {
-        steps {
-
-            build(
-                job: 'frontend-deploy',
-                wait: false,
-                parameters: [
-                    string(
-                        name: 'VERSION',
-                        value: version
-                    )
-                ]
-            )
-
-        }
-    }
-    */
-
-    post {
-
-        always {
-            echo "===== CLEANING WORKSPACE ====="
-            deleteDir()
-        }
-
-        success {
-            echo "======================================"
-            echo "Frontend Pipeline Successful"
-            echo "Version: ${version}"
-            echo "======================================"
-        }
-
-        failure {
-            echo "======================================"
-            echo "Frontend Pipeline Failed"
-            echo "Version: ${version}"
-            echo "======================================"
-        }
-    }
-}
 }

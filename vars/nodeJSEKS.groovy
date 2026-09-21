@@ -70,9 +70,15 @@ def call(Map configMap) {
                         echo "===== ARTIFACT CREATED ====="
 
                         ls -lh frontend-${BUILD_NUMBER}.zip
+                                    echo "===== CHECKING NGINX CONFIG BEFORE DOCKER BUILD ====="
+pwd
+ls -la
+cat localhelp.conf
+
                     '''
                 }
             }
+
 
             stage('Docker Build and Push to ECR') {
                 steps {

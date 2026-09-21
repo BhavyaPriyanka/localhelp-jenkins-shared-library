@@ -70,11 +70,15 @@ def call(Map configMap) {
                         echo "===== ARTIFACT CREATED ====="
 
                         ls -lh frontend-${BUILD_NUMBER}.zip
-                                    echo "===== CHECKING NGINX CONFIG BEFORE DOCKER BUILD ====="
-pwd
-ls -la
-cat localhelp.conf
-
+                                    sh '''
+    echo "===== DOCKER BUILD DEBUG ====="
+    pwd
+    ls -la
+    echo "===== localhelp.conf ====="
+    cat localhelp.conf
+    echo "===== Dockerfile ====="
+    cat Dockerfile
+    echo "============================="
                     '''
                 }
             }
@@ -96,7 +100,7 @@ cat localhelp.conf
 
                         echo "===== BUILDING FRONTEND DOCKER IMAGE ====="
 
-                        docker build \
+                        docker build  --no-cache\
                             -t ${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${version} \
                             .
 

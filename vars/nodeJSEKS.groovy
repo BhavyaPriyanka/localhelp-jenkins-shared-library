@@ -115,7 +115,7 @@ pipeline {
             }
         }
 
-        stage('Deploy to K8') {
+                stage('Deploy to K8') {
     steps {
         sh """
             set -e
@@ -162,15 +162,15 @@ pipeline {
 
                 echo "========= GET FRONTEND TARGET GROUP ARN =========="
 
-                TARGET_GROUP_ARN=\$(aws elbv2 describe-target-groups \
+                TARGET_GROUP_ARN=\\$(aws elbv2 describe-target-groups \
                     --region us-east-1 \
                     --names localhelp-dev-frontend \
                     --query 'TargetGroups[0].TargetGroupArn' \
                     --output text)
 
-                echo "TARGET GROUP ARN = \$TARGET_GROUP_ARN"
+                echo "TARGET GROUP ARN = \\$TARGET_GROUP_ARN"
 
-                if [ -z "\$TARGET_GROUP_ARN" ] || [ "\$TARGET_GROUP_ARN" = "None" ]; then
+                if [ -z "\\$TARGET_GROUP_ARN" ] || [ "\\$TARGET_GROUP_ARN" = "None" ]; then
                     echo "ERROR: Frontend target group not found"
                     exit 1
                 fi
@@ -188,8 +188,8 @@ pipeline {
                 helm upgrade --install frontend . \
                     --namespace localhelp \
                     --create-namespace \
-                    --set deployment.imageVersion="\${IMAGE_VERSION}" \
-                    --set targetGroup.arn="\${TARGET_GROUP_ARN}"
+                    --set deployment.imageVersion="\\${IMAGE_VERSION}" \
+                    --set targetGroup.arn="\\${TARGET_GROUP_ARN}"
 
                 echo "========= HELM RELEASE STATUS =========="
 

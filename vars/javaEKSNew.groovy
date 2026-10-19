@@ -1,3 +1,4 @@
+
 def call(Map configMap) {
 
     def version
@@ -21,6 +22,7 @@ def call(Map configMap) {
             region     = pipelineGlobals.region()
             component  = configMap.get("component")
             project    = configMap.get("project")
+            APP_DIR    = configMap.get("appDir") ?: "."
         }
 
         stages {
@@ -30,8 +32,11 @@ def call(Map configMap) {
                     checkout scm
 
                     sh '''
+                        set -e
                         echo "===== CHECKED OUT SOURCE ====="
                         git log -1 --oneline
+                        echo "Application directory: $APP_DIR"
+                        test -d "$APP_DIR"
                     '''
                 }
             }
@@ -67,84 +72,97 @@ def call(Map configMap) {
                         echo "Git Tag : ${gitTag}"
                         echo "Version : ${version}"
 
-                        sh """
-                            mvn versions:set \
-                              -DnewVersion=${version} \
-                              -DgenerateBackupPoms=false
-                        """
+                        dir(env.APP_DIR) {
+                            sh """
+                                set -e
+                                mvn versions:set \
+                                  -DnewVersion=${version} \
+                                  -DgenerateBackupPoms=false
+                            """
+                        }
                     }
                 }
             }
 
             stage('4. Install Dependencies') {
                 steps {
-                    sh '''
-                        set -e
+                    dir(env.APP_DIR) {
+                        sh '''
+                            set -e
 
-                        echo "===== RESOLVING MAVEN DEPENDENCIES ====="
+                            echo "===== RESOLVING MAVEN DEPENDENCIES ====="
 
-                        mvn dependency:resolve
+                            mvn dependency:resolve
 
-                        echo "===== MAVEN CACHE ====="
-                        ls -la ~/.m2
-                    '''
+                            echo "===== MAVEN CACHE ====="
+                            ls -la ~/.m2
+                        '''
+                    }
                 }
             }
 
             stage('5. Code Compilation') {
                 steps {
-                    sh '''
-                        set -e
+                    dir(env.APP_DIR) {
+                        sh '''
+                            set -e
 
-                        echo "===== COMPILING APPLICATION ====="
+                            echo "===== COMPILING APPLICATION ====="
 
-                        mvn -q compile
+                            mvn -q compile
 
-                        echo "===== COMPILATION SUCCESSFUL ====="
-                    '''
+                            echo "===== COMPILATION SUCCESSFUL ====="
+                        '''
+                    }
                 }
             }
 
             stage('6. Unit Tests') {
                 steps {
-                    sh '''
-                        set -e
+                    dir(env.APP_DIR) {
+                        sh '''
+                            set -e
 
-                        echo "===== RUNNING UNIT TESTS ====="
+                            echo "===== RUNNING UNIT TESTS ====="
 
-                        mvn -q test
+                            mvn -q test
 
-                        echo "===== UNIT TESTS PASSED ====="
-                    '''
+                            echo "===== UNIT TESTS PASSED ====="
+                        '''
+                    }
                 }
             }
 
             stage('7. Code Coverage') {
                 steps {
-                    sh '''
-                        set -e
+                    dir(env.APP_DIR) {
+                        sh '''
+                            set -e
 
-                        echo "===== GENERATING CODE COVERAGE ====="
+                            echo "===== GENERATING CODE COVERAGE ====="
 
-                        mvn -q verify
+                            mvn -q verify
 
-                        echo "===== CODE COVERAGE COMPLETED ====="
-                    '''
+                            echo "===== CODE COVERAGE COMPLETED ====="
+                        '''
+                    }
                 }
             }
 
             stage('8. Static Code Analysis') {
                 steps {
-                    sh '''
-                        set -e
+                    dir(env.APP_DIR) {
+                        sh '''
+                            set -e
 
-                        echo "===== STATIC CODE ANALYSIS ====="
+                            echo "===== STATIC CODE ANALYSIS ====="
 
-                        # Enable when SonarQube is configured
-                        # mvn sonar:sonar
+                            # Enable when SonarQube is configured
+                            # mvn sonar:sonar
 
-                        echo "===== STATIC ANALYSIS COMPLETED ====="
-                    '''
+                            echo "===== STATIC ANALYSIS COMPLETED ====="
+                        '''
+                    }
                 }
             }
 
@@ -163,46 +181,50 @@ def call(Map configMap) {
 
             stage('10. Package Application') {
                 steps {
-                    sh '''
-                        set -e
+                    dir(env.APP_DIR) {
+                        sh '''
+                            set -e
 
-                        echo "===== PACKAGING APPLICATION ====="
+                            echo "===== PACKAGING APPLICATION ====="
 
-                        mvn -q clean package -DskipTests
+                            mvn -q clean package -DskipTests
 
-                        echo "===== GENERATED ARTIFACT ====="
-                        ls -ltr target
-                    '''
+                            echo "===== GENERATED ARTIFACT ====="
+                            ls -ltr target
+                        '''
+                    }
                 }
             }
 
             stage('11. Prepare Artifact') {
                 steps {
-                    script {
-                        artifactId = sh(
-                            script: "mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout",
-                            returnStdout: true
-                        ).trim()
+                    dir(env.APP_DIR) {
+                        script {
+                            artifactId = sh(
+                                script: "mvn help:evaluate -Dexpression=project.artifactId -q -DforceStdout",
+                                returnStdout: true
+                            ).trim()
 
-                        groupId = sh(
-                            script: "mvn help:evaluate -Dexpression=project.groupId -q -DforceStdout",
-                            returnStdout: true
-                        ).trim()
+                            groupId = sh(
+                                script: "mvn help:evaluate -Dexpression=project.groupId -q -DforceStdout",
+                                returnStdout: true
+                            ).trim()
 
-                        echo "Group Id     : ${groupId}"
-                        echo "Artifact Id  : ${artifactId}"
-                        echo "Version      : ${version}"
+                            echo "Group Id     : ${groupId}"
+                            echo "Artifact Id  : ${artifactId}"
+                            echo "Version      : ${version}"
+                        }
+
+                        sh '''
+                            set -e
+
+                            echo "===== VERIFYING JAR ====="
+
+                            ls -lh target/*.jar
+
+                            echo "===== ARTIFACT READY ====="
+                        '''
                     }
-
-                    sh '''
-                        set -e
-
-                        echo "===== VERIFYING JAR ====="
-
-                        ls -lh target/*.jar
-
-                        echo "===== ARTIFACT READY ====="
-                    '''
                 }
             }
 
@@ -212,9 +234,11 @@ def call(Map configMap) {
                         set -e
 
                         echo "===== BUILDING DOCKER IMAGE ====="
+                        echo "Docker build context: ${env.APP_DIR}"
 
                         docker build \
-                          -t ${account_id}.dkr.ecr.${region}.amazonaws.com/${component}:${version} .
+                          -t ${account_id}.dkr.ecr.${region}.amazonaws.com/${component}:${version} \
+                          "${env.APP_DIR}"
 
                         echo "===== DOCKER IMAGE CREATED ====="
 
@@ -226,6 +250,8 @@ def call(Map configMap) {
             stage('13. Docker Image Scan') {
                 steps {
                     sh """
+                        set -e
+
                         echo "===== DOCKER IMAGE SECURITY SCAN ====="
 
                         # Add Trivy or approved scanner here.
@@ -284,13 +310,13 @@ def call(Map configMap) {
                         echo "===== UPLOADING JAR TO S3 ====="
 
                         aws s3 cp \
-                          target/${artifactId}-${version}.jar \
+                          "${env.APP_DIR}/target/${artifactId}-${version}.jar" \
                           s3://localhelp-backend-artifacts/backend/${version}/${artifactId}-${version}.jar
 
                         echo "===== UPLOADING DB SCRIPT ====="
 
                         aws s3 cp \
-                          db/init.sql \
+                          "${env.APP_DIR}/db/init.sql" \
                           s3://localhelp-backend-artifacts/backend/${version}/init.sql
 
                         echo "===== VERIFYING S3 ARTIFACTS ====="
@@ -351,7 +377,7 @@ def call(Map configMap) {
                           'rm -rf /tmp/backend-helm'
 
                         scp \$SSH_OPTS \
-                          -r helm \
+                          -r "${env.APP_DIR}/helm" \
                           ec2-user@\$BASTION_IP:/tmp/backend-helm
 
                         echo "===== DEPLOY BACKEND ====="

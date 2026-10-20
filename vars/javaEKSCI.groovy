@@ -1,4 +1,3 @@
-
 def call(Map configMap) {
     def appDir = configMap.get("appDir") ?: "backend"
     def project = configMap.get("project") ?: "localhelp"

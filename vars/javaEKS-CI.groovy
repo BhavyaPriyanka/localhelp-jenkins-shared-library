@@ -25,6 +25,7 @@ def call(Map configMap) {
             COMPONENT = "${component}"
             PROJECT_NAME = "${project}"
             SONAR_PROJECT_KEY = "${sonarProjectKey}"
+            CD_JOB_NAME = 'javaEKS-CD'
         }
 
         stages {
@@ -179,6 +180,27 @@ def call(Map configMap) {
                     }
                 }
             }
+
+         stage('Trigger CD Pipeline') {
+                steps {
+                    script {
+                        echo "Triggering CD for image: ${env.ECR_IMAGE}:${env.BUILD_VERSION}"
+
+                        build(
+                            job: env.CD_JOB_NAME,
+                            wait: false,
+                            parameters: [
+                                string(
+                                    name: 'IMAGE_TAG',
+                                    value: env.BUILD_VERSION
+                                )
+                            ]
+                        )
+
+                        echo "CD pipeline triggered for ${env.BUILD_VERSION}"
+                    }
+                }
+}
         }
 
         post {

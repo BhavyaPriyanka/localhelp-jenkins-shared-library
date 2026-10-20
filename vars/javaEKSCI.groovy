@@ -1,3 +1,4 @@
+
 def call(Map configMap) {
     def appDir = configMap.get("appDir") ?: "backend"
     def project = configMap.get("project") ?: "localhelp"
@@ -13,6 +14,7 @@ def call(Map configMap) {
             timestamps()
             disableConcurrentBuilds()
             buildDiscarder(logRotator(numToKeepStr: '20'))
+            timeout(time: 30, unit: 'MINUTES')
         }
 
         environment {
@@ -54,6 +56,7 @@ def call(Map configMap) {
                         ).toLowerCase().replaceAll(/[^a-z0-9_.-]/, '-')
 
                         echo "Component: ${env.COMPONENT}"
+                        echo "Application directory: ${env.APP_DIR}"
                         echo "Build version: ${env.BUILD_VERSION}"
                         echo "Commit: ${commit}"
                     }
@@ -69,13 +72,17 @@ def call(Map configMap) {
                     '''
                 }
             }
+
             stage('Install Dependencies') {
-    steps {
-        dir('backend') {
-            sh 'mvn dependency:resolve'
-        }
-    }
-}
+                steps {
+                    dir("${env.APP_DIR}") {
+                        sh '''
+                            set -eu
+                            mvn -B dependency:resolve
+                        '''
+                    }
+                }
+            }
 
             stage('Compile and Unit Tests') {
                 steps {
@@ -109,9 +116,11 @@ def call(Map configMap) {
                     timeout(time: 5, unit: 'MINUTES') {
                         script {
                             def qualityGate = waitForQualityGate()
+
                             if (qualityGate.status != 'OK') {
                                 error "SonarQube Quality Gate failed: ${qualityGate.status}"
                             }
+
                             echo "SonarQube Quality Gate: ${qualityGate.status}"
                         }
                     }
@@ -187,7 +196,7 @@ def call(Map configMap) {
                 }
             }
 
-         stage('Trigger CD Pipeline') {
+            stage('Trigger CD Pipeline') {
                 steps {
                     script {
                         echo "Triggering CD for image: ${env.ECR_IMAGE}:${env.BUILD_VERSION}"
@@ -206,7 +215,7 @@ def call(Map configMap) {
                         echo "CD pipeline triggered for ${env.BUILD_VERSION}"
                     }
                 }
-}
+            }
         }
 
         post {

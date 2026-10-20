@@ -5,7 +5,7 @@ def decidePipeline(Map configMap){
 
     switch(type){
         case "javaEKS":
-                javaEKS-CI(configMap)
+                javaEKSCI(configMap)
         break
 
         case "nodeJSEKS":

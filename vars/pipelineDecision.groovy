@@ -4,8 +4,8 @@ def decidePipeline(Map configMap){
     def type = configMap.get("type")
 
     switch(type){
-        case "javaEKS-CI":
-                javaEKS(configMap)
+        case "javaEKS":
+                javaEKS-CI(configMap)
         break
 
         case "nodeJSEKS":

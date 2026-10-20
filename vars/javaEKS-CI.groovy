@@ -70,6 +70,13 @@ def call(Map configMap) {
                     '''
                 }
             }
+            stage('Install Dependencies') {
+    steps {
+        dir('backend') {
+            sh 'mvn dependency:resolve'
+        }
+    }
+}
 
             stage('Compile and Unit Tests') {
                 steps {

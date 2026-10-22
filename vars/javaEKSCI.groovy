@@ -73,21 +73,20 @@ def call(Map configMap) {
                 }
             }
 
-            stage('Install Dependencies') {
-    steps {
-        sh '''
-            echo "=== ACTIVE PIPELINE DIAGNOSTIC ==="
-            pwd
-            echo "APP_DIR=$APP_DIR"
-            ls -la
-            ls -la backend/pom.xml
-            cd "$APP_DIR"
-            pwd
-            ls -l pom.xml
-            mvn -B dependency:resolve
-        '''
-    }
-}
+           stage('Install Dependencies') {
+            steps {
+                dir("${env.APP_DIR}") {
+                    sh '''
+                        set -eu
+                        echo "Workspace: $WORKSPACE"
+                        echo "APP_DIR=$APP_DIR"
+                        echo "Maven directory: $(pwd)"
+                        test -f pom.xml
+                        mvn -B dependency:resolve
+                    '''
+                }
+            }
+        }
             stage('Compile and Unit Tests') {
                 steps {
                     dir("${env.APP_DIR}") {

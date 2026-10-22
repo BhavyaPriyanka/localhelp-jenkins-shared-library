@@ -51,42 +51,40 @@ def call(Map configMap) {
                 }
             }
 
-            
-stage('SonarQube Analysis') {
-    steps {
-        script {
-            def scannerHome = tool(
-                name: 'SonarScanner',
-                type: 'hudson.plugins.sonar.SonarRunnerInstallation'
-            )
+            stage('SonarQube Analysis') {
+                steps {
+                    script {
+                        def scannerHome = tool(
+                            name: 'SonarScanner',
+                            type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+                        )
 
-            withSonarQubeEnv('SonarQube') {
-                withEnv(["PATH+SONAR_SCANNER=${scannerHome}/bin"]) {
-                    dir('frontend') {
-                        sh '''
-                            set -eu
+                        withSonarQubeEnv('SonarQube') {
+                            withEnv(["PATH+SONAR_SCANNER=${scannerHome}/bin"]) {
+                                dir('frontend') {
+                                    sh '''
+                                        set -eu
 
-                            echo "===== FRONTEND SONARQUBE ANALYSIS ====="
+                                        echo "===== FRONTEND SONARQUBE ANALYSIS ====="
 
-                            sonar-scanner \
-                                -Dsonar.projectKey=localhelp-frontend \
-                                -Dsonar.projectName=localhelp-frontend \
-                                -Dsonar.projectVersion="${IMAGE_VERSION}" \
-                                -Dsonar.sources=src \
-                                -Dsonar.exclusions="node_modules/**,build/**,coverage/**" \
-                                -Dsonar.sourceEncoding=UTF-8
+                                        sonar-scanner \
+                                            -Dsonar.projectKey=localhelp-frontend \
+                                            -Dsonar.projectName=localhelp-frontend \
+                                            -Dsonar.projectVersion="${IMAGE_VERSION}" \
+                                            -Dsonar.sources=src \
+                                            -Dsonar.exclusions="node_modules/**,build/**,coverage/**" \
+                                            -Dsonar.sourceEncoding=UTF-8
 
-                            test -f .scannerwork/report-task.txt
+                                        test -f .scannerwork/report-task.txt
 
-                            echo "===== SONARQUBE ANALYSIS SUBMITTED ====="
-                        '''
+                                        echo "===== SONARQUBE ANALYSIS SUBMITTED ====="
+                                    '''
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
-    }
-}
-
 
             stage('SonarQube Quality Gate') {
                 steps {
@@ -125,7 +123,8 @@ stage('SonarQube Analysis') {
                                             -u "$SONAR_TOKEN:" \
                                             "$CE_TASK_URL"); then
 
-                                            STATUS=$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"]["status"])')
+                                            STATUS=$(printf '%s\n' "$RESPONSE" |
+                                                sed -n 's/.*"task"[[:space:]]*:[[:space:]]*{[^}]*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
                                             echo "SonarQube task status: $STATUS"
 
@@ -146,15 +145,12 @@ stage('SonarQube Analysis') {
                                     done
 
                                     if [ "$STATUS" != "SUCCESS" ]; then
-                                        echo "ERROR: SonarQube analysis timed out"
+                                        echo "ERROR: SonarQube analysis timed out or returned an unrecognized status"
                                         exit 1
                                     fi
 
-                                    ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
-                                        python3 -c '
-                        import json,sys
-                        print(json.load(sys.stdin)["task"].get("analysisId", ""))
-                        ')
+                                    ANALYSIS_ID=$(printf '%s\n' "$RESPONSE" |
+                                        sed -n 's/.*"analysisId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
                                     if [ -z "$ANALYSIS_ID" ]; then
                                         echo "ERROR: Analysis ID not found"
@@ -167,16 +163,13 @@ stage('SonarQube Analysis') {
                                         -u "$SONAR_TOKEN:" \
                                         "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
 
-                                    GATE=$(printf '%s' "$GATE_RESPONSE" |
-                                        python3 -c '
-                                                import json,sys
-                                                print(json.load(sys.stdin)["projectStatus"]["status"])
-                                                ')
+                                    GATE=$(printf '%s\n' "$GATE_RESPONSE" |
+                                        sed -n 's/.*"projectStatus"[[:space:]]*:[[:space:]]*{[^}]*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
                                     echo "SonarQube Quality Gate: $GATE"
 
                                     if [ "$GATE" != "OK" ]; then
-                                        echo "ERROR: Quality Gate failed"
+                                        echo "ERROR: Quality Gate failed or its status could not be parsed"
                                         exit 1
                                     fi
 
@@ -332,22 +325,22 @@ stage('SonarQube Analysis') {
             }
 
             stage('Trigger Frontend CD') {
-                    steps {
-                        script {
-                            echo "Triggering frontend CD for image tag: ${env.IMAGE_VERSION}"
+                steps {
+                    script {
+                        echo "Triggering frontend CD for image tag: ${env.IMAGE_VERSION}"
 
-                              build job: 'frontend-CD',
-                                    wait: true,
-                                    propagate: true,
-                                    parameters: [
-                                        string(
-                                            name: 'IMAGE_TAG',
-                                            value: env.IMAGE_VERSION
-                                        )
-                                    ]
-                            }
+                        build job: 'frontend-CD',
+                            wait: true,
+                            propagate: true,
+                            parameters: [
+                                string(
+                                    name: 'IMAGE_TAG',
+                                    value: env.IMAGE_VERSION
+                                )
+                            ]
                     }
-}
+                }
+            }
 
             stage('CI Success') {
                 steps {

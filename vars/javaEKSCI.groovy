@@ -45,18 +45,12 @@ def call(Map configMap) {
                             returnStdout: true
                         ).trim()
 
-                        def branch = (env.BRANCH_NAME ?: 'manual')
-                            .replaceAll(/[^A-Za-z0-9_.-]/, '-')
-                            .toLowerCase()
-
                         env.BUILD_VERSION = (
                             gitTag
                                 ? gitTag.replaceFirst(/^v/, '')
-                                : "${branch}-${env.BUILD_NUMBER}-${commit}"
+                                : "sha-${commit}"
                         ).toLowerCase().replaceAll(/[^a-z0-9_.-]/, '-')
 
-                        echo "Component: ${env.COMPONENT}"
-                        echo "Application directory: ${env.APP_DIR}"
                         echo "Build version: ${env.BUILD_VERSION}"
                         echo "Commit: ${commit}"
                     }

@@ -22,19 +22,18 @@ def call(Map configMap) {
 
         stages {
 
-            stage('Install Dependencies') {
+            sstage('Install Dependencies') {
                 steps {
-                    sh '''
-                        set -e
-
-                        echo "===== INSTALLING NPM DEPENDENCIES ====="
-
-                        npm ci
-
-                        echo "===== DEPENDENCIES INSTALLED ====="
-                    '''
+                    dir('frontend') {
+                        sh '''
+                            set -e
+                            echo "===== INSTALLING NPM DEPENDENCIES ====="
+                            npm ci
+                            echo "===== DEPENDENCIES INSTALLED ====="
+                        '''
+                    }
                 }
-            }
+}
 
             stage('Build React Application') {
                 steps {

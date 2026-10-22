@@ -86,109 +86,104 @@ def call(Map configMap) {
                 }
             }
 
-    
-         
-stage('SonarQube Quality Gate') {
-    steps {
-        script {
-            withSonarQubeEnv('SonarQube') {
-                withCredentials([
-                    string(
-                        credentialsId: 'sonarqube-token',
-                        variable: 'SONAR_TOKEN'
-                    )
-                ]) {
-                    sh '''
-                        set -eu
+            stage('SonarQube Quality Gate') {
+                steps {
+                    script {
+                        withSonarQubeEnv('SonarQube') {
+                            withCredentials([
+                                string(
+                                    credentialsId: 'sonarqube-token',
+                                    variable: 'SONAR_TOKEN'
+                                )
+                            ]) {
+                                sh '''
+                                    set -eu
 
-                        TASK_FILE="frontend/.scannerwork/report-task.txt"
+                                    TASK_FILE="frontend/.scannerwork/report-task.txt"
 
-                        if [ ! -f "$TASK_FILE" ]; then
-                            echo "ERROR: Sonar report-task.txt not found"
-                            exit 1
-                        fi
+                                    if [ ! -f "$TASK_FILE" ]; then
+                                        echo "ERROR: Sonar report-task.txt not found"
+                                        exit 1
+                                    fi
 
-                        CE_TASK_URL=$(grep '^ceTaskUrl=' "$TASK_FILE" | cut -d= -f2-)
+                                    CE_TASK_URL=$(grep '^ceTaskUrl=' "$TASK_FILE" | cut -d= -f2-)
 
-                        if [ -z "$CE_TASK_URL" ]; then
-                            echo "ERROR: ceTaskUrl not found"
-                            exit 1
-                        fi
+                                    if [ -z "$CE_TASK_URL" ]; then
+                                        echo "ERROR: ceTaskUrl not found"
+                                        exit 1
+                                    fi
 
-                        STATUS="PENDING"
-                        RESPONSE=""
+                                    STATUS="PENDING"
+                                    RESPONSE=""
 
-                        for i in $(seq 1 30); do
-                            if RESPONSE=$(curl -fsS \
-                                --connect-timeout 10 \
-                                --max-time 30 \
-                                -u "$SONAR_TOKEN:" \
-                                "$CE_TASK_URL"); then
+                                    for i in $(seq 1 30); do
+                                        if RESPONSE=$(curl -fsS \
+                                            --connect-timeout 10 \
+                                            --max-time 30 \
+                                            -u "$SONAR_TOKEN:" \
+                                            "$CE_TASK_URL"); then
 
-                                STATUS=$(printf '%s\\n' "$RESPONSE" |
-                                    grep -o '"status":"[^"]*"' |
-                                    head -n 1 |
-                                    cut -d'"' -f4)
+                                            STATUS=$(printf '%s\\n' "$RESPONSE" |
+                                                grep -o '"status":"[^"]*"' |
+                                                head -n 1 |
+                                                cut -d'"' -f4)
 
-                                echo "SonarQube task status: $STATUS"
+                                            echo "SonarQube task status: $STATUS"
 
-                                if [ "$STATUS" = "SUCCESS" ]; then
-                                    break
-                                fi
+                                            if [ "$STATUS" = "SUCCESS" ]; then
+                                                break
+                                            fi
 
-                                if [ "$STATUS" = "FAILED" ] ||
-                                   [ "$STATUS" = "CANCELED" ]; then
-                                    echo "ERROR: SonarQube analysis task failed"
-                                    exit 1
-                                fi
-                            else
-                                echo "SonarQube task request failed; retrying"
-                            fi
+                                            if [ "$STATUS" = "FAILED" ] ||
+                                               [ "$STATUS" = "CANCELED" ]; then
+                                                echo "ERROR: SonarQube analysis task failed"
+                                                exit 1
+                                            fi
+                                        else
+                                            echo "SonarQube task request failed; retrying"
+                                        fi
 
-                            sleep 10
-                        done
+                                        sleep 10
+                                    done
 
-                        if [ "$STATUS" != "SUCCESS" ]; then
-                            echo "ERROR: SonarQube analysis timed out"
-                            exit 1
-                        fi
+                                    if [ "$STATUS" != "SUCCESS" ]; then
+                                        echo "ERROR: SonarQube analysis timed out"
+                                        exit 1
+                                    fi
 
-                        ANALYSIS_ID=$(printf '%s\\n' "$RESPONSE" |
-                            grep -o '"analysisId":"[^"]*"' |
-                            head -n 1 |
-                            cut -d'"' -f4)
+                                    ANALYSIS_ID=$(printf '%s\\n' "$RESPONSE" |
+                                        grep -o '"analysisId":"[^"]*"' |
+                                        head -n 1 |
+                                        cut -d'"' -f4)
 
-                        if [ -z "$ANALYSIS_ID" ]; then
-                            echo "ERROR: Analysis ID not found"
-                            exit 1
-                        fi
+                                    if [ -z "$ANALYSIS_ID" ]; then
+                                        echo "ERROR: Analysis ID not found"
+                                        exit 1
+                                    fi
 
-                        GATE_RESPONSE=$(curl -fsS \
-                            --connect-timeout 10 \
-                            --max-time 30 \
-                            -u "$SONAR_TOKEN:" \
-                            "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
+                                    GATE_RESPONSE=$(curl -fsS \
+                                        --connect-timeout 10 \
+                                        --max-time 30 \
+                                        -u "$SONAR_TOKEN:" \
+                                        "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
 
-                        GATE=$(printf '%s\\n' "$GATE_RESPONSE" |
-                            grep -o '"projectStatus":{[^}]*}' |
-                            grep -o '"status":"[^"]*"' |
-                            cut -d'"' -f4)
+                                    GATE=$(printf '%s' "$GATE_RESPONSE" |
+                                        sed -n 's/.*"projectStatus"[[:space:]]*:[[:space:]]*{[^}]*"status"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
 
-                        echo "SonarQube Quality Gate: $GATE"
+                                    echo "SonarQube Quality Gate: $GATE"
 
-                        if [ "$GATE" != "OK" ]; then
-                            echo "ERROR: Quality Gate failed or status could not be parsed"
-                            exit 1
-                        fi
+                                    if [ "$GATE" != "OK" ]; then
+                                        echo "ERROR: Quality Gate failed or status could not be parsed"
+                                        exit 1
+                                    fi
 
-                        echo "===== FRONTEND QUALITY GATE PASSED ====="
-                    '''
+                                    echo "===== FRONTEND QUALITY GATE PASSED ====="
+                                '''
+                            }
+                        }
+                    }
                 }
             }
-        }
-    }
-}
-
 
             stage('ECR Login') {
                 steps {

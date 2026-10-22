@@ -2,7 +2,6 @@
 def call(Map configMap) {
 
     pipeline {
-
         agent {
             label 'AGENT-1'
         }
@@ -20,7 +19,6 @@ def call(Map configMap) {
         }
 
         stages {
-
             stage('Initialize Version') {
                 steps {
                     script {
@@ -37,14 +35,10 @@ def call(Map configMap) {
                     dir('frontend') {
                         sh '''
                             set -eu
-
                             echo "===== INSTALLING NPM DEPENDENCIES ====="
-
                             test -f package.json
                             test -f package-lock.json
-
                             npm ci
-
                             echo "===== DEPENDENCIES INSTALLED ====="
                         '''
                     }
@@ -64,7 +58,6 @@ def call(Map configMap) {
                                 dir('frontend') {
                                     sh '''
                                         set -eu
-
                                         echo "===== FRONTEND SONARQUBE ANALYSIS ====="
 
                                         sonar-scanner \
@@ -72,11 +65,10 @@ def call(Map configMap) {
                                             -Dsonar.projectName=localhelp-frontend \
                                             -Dsonar.projectVersion="${IMAGE_VERSION}" \
                                             -Dsonar.sources=src \
-                                            -Dsonar.exclusions="node_modules/**,build/**,coverage/**" \
+                                            -Dsonar.exclusions="node_modules/**,build/**,dist/**,coverage/**" \
                                             -Dsonar.sourceEncoding=UTF-8
 
                                         test -f .scannerwork/report-task.txt
-
                                         echo "===== SONARQUBE ANALYSIS SUBMITTED ====="
                                     '''
                                 }
@@ -100,18 +92,16 @@ def call(Map configMap) {
                                     set -eu
 
                                     TASK_FILE="frontend/.scannerwork/report-task.txt"
-
-                                    if [ ! -f "$TASK_FILE" ]; then
+                                    test -f "$TASK_FILE" || {
                                         echo "ERROR: Sonar report-task.txt not found"
                                         exit 1
-                                    fi
+                                    }
 
-                                    CE_TASK_URL=$(grep '^ceTaskUrl=' "$TASK_FILE" | cut -d= -f2-)
-
-                                    if [ -z "$CE_TASK_URL" ]; then
+                                    CE_TASK_URL=$(sed -n 's/^ceTaskUrl=//p' "$TASK_FILE")
+                                    test -n "$CE_TASK_URL" || {
                                         echo "ERROR: ceTaskUrl not found"
                                         exit 1
-                                    fi
+                                    }
 
                                     STATUS="PENDING"
                                     RESPONSE=""
@@ -123,10 +113,8 @@ def call(Map configMap) {
                                             -u "$SONAR_TOKEN:" \
                                             "$CE_TASK_URL"); then
 
-                                            STATUS=$(printf '%s\\n' "$RESPONSE" |
-                                                grep -o '"status":"[^"]*"' |
-                                                head -n 1 |
-                                                cut -d'"' -f4)
+                                            STATUS=$(printf '%s' "$RESPONSE" |
+                                                sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
                                             echo "SonarQube task status: $STATUS"
 
@@ -151,15 +139,13 @@ def call(Map configMap) {
                                         exit 1
                                     fi
 
-                                    ANALYSIS_ID=$(printf '%s\\n' "$RESPONSE" |
-                                        grep -o '"analysisId":"[^"]*"' |
-                                        head -n 1 |
-                                        cut -d'"' -f4)
+                                    ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
+                                        sed -n 's/.*"analysisId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
-                                    if [ -z "$ANALYSIS_ID" ]; then
+                                    test -n "$ANALYSIS_ID" || {
                                         echo "ERROR: Analysis ID not found"
                                         exit 1
-                                    fi
+                                    }
 
                                     GATE_RESPONSE=$(curl -fsS \
                                         --connect-timeout 10 \
@@ -168,7 +154,7 @@ def call(Map configMap) {
                                         "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
 
                                     GATE=$(printf '%s' "$GATE_RESPONSE" |
-                                        sed -n 's/.*"projectStatus"[[:space:]]*:[[:space:]]*{[^}]*"status"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
+                                        sed -n 's/.*"projectStatus"[[:space:]]*:[[:space:]]*{[^}]*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
                                     echo "SonarQube Quality Gate: $GATE"
 
@@ -185,26 +171,64 @@ def call(Map configMap) {
                 }
             }
 
-
             stage('Build Frontend Image') {
-                    steps {
-                        dir('frontend') {
-                            sh '''
-                                set -eu
+                steps {
+                    dir('frontend') {
+                        sh '''
+                            set -eu
 
-                                IMAGE_URI="${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${IMAGE_VERSION}"
+                            IMAGE_URI="${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${IMAGE_VERSION}"
 
-                                echo "===== BUILDING FRONTEND IMAGE ====="
+                            echo "===== BUILDING FRONTEND IMAGE ====="
+                            test -f Dockerfile || {
+                                echo "ERROR: frontend/Dockerfile not found"
+                                exit 1
+                            }
 
-                                docker build -t "$IMAGE_URI" .
+                            docker build -t "$IMAGE_URI" .
+                            docker image inspect "$IMAGE_URI"
 
-                                docker image inspect "$IMAGE_URI"
-
-                                echo "===== FRONTEND IMAGE BUILT ====="
-                            '''
-                        }
+                            echo "===== FRONTEND IMAGE BUILT ====="
+                        '''
                     }
-                                        }
+                }
+            }
+
+            stage('Package Frontend Artifact') {
+                steps {
+                    dir('frontend') {
+                        sh '''
+                            set -eu
+
+                            echo "===== PACKAGING FRONTEND ARTIFACT ====="
+
+                            if [ -d dist ]; then
+                                BUILD_DIR="dist"
+                            elif [ -d build ]; then
+                                BUILD_DIR="build"
+                            else
+                                echo "ERROR: Neither dist/ nor build/ exists."
+                                echo "Check your frontend build script."
+                                exit 1
+                            fi
+
+                            command -v zip >/dev/null 2>&1 || {
+                                echo "ERROR: zip utility is not installed on the Jenkins agent."
+                                exit 1
+                            }
+
+                            ARTIFACT="frontend-${IMAGE_VERSION}.zip"
+                            rm -f "$ARTIFACT"
+                            zip -rq "$ARTIFACT" "$BUILD_DIR"
+
+                            test -s "$ARTIFACT"
+                            echo "Created artifact: $ARTIFACT"
+                            ls -lh "$ARTIFACT"
+                        '''
+                    }
+                }
+            }
+
             stage('ECR Login') {
                 steps {
                     sh '''
@@ -232,8 +256,7 @@ def call(Map configMap) {
                         IMAGE_URI="${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${IMAGE_VERSION}"
 
                         echo "===== PUSHING FRONTEND IMAGE ====="
-                        echo "IMAGE: $IMAGE_URI"
-
+                        docker image inspect "$IMAGE_URI"
                         docker push "$IMAGE_URI"
 
                         echo "===== VERIFYING IMAGE IN ECR ====="
@@ -270,11 +293,8 @@ def call(Map configMap) {
                             echo "===== UPLOADING FRONTEND ARTIFACT TO S3 ====="
 
                             test -s "$ARTIFACT"
-
                             aws s3 cp "$ARTIFACT" "$S3_PATH"
-
-                            aws s3 ls \
-                                "s3://localhelp-frontend-artifacts/frontend/${IMAGE_VERSION}/"
+                            aws s3 ls "s3://localhelp-frontend-artifacts/frontend/${IMAGE_VERSION}/"
 
                             echo "===== S3 UPLOAD SUCCESSFUL ====="
                         '''

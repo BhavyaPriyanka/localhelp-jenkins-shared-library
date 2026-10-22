@@ -134,6 +134,29 @@ def call(Map configMap) {
     }
 }
 
+        stage('Initialize RDS Database') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'localhelp-rds-admin',
+                        usernameVariable: 'DB_ADMIN_USER',
+                        passwordVariable: 'DB_ADMIN_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        set +x
+
+                        mysql \
+                        --host="$DB_HOST" \
+                        --port=3306 \
+                        --user="$DB_ADMIN_USER" \
+                        --password="$DB_ADMIN_PASSWORD" \
+                        < backend/src/main/resources/db/init.sql
+                    '''
+                }
+            }
+        }       
+
            stage('Install Dependencies') {
             steps {
                 dir("${env.APP_DIR}") {

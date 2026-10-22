@@ -73,6 +73,27 @@ def call(Map configMap) {
                 }
             }
 
+            stage('Load DB Credentials') {
+                steps {
+                    script {
+                        env.DB_HOST = 'db-dev.localhelp.store'
+                        env.DB_USERNAME = 'root'
+
+                        env.DB_PASSWORD = sh(
+                            script: '''
+                                aws secretsmanager get-secret-value \
+                                --secret-id 'YOUR_RDS_SECRET_ARN' \
+                                --region us-east-1 \
+                                --query SecretString \
+                                --output text |
+                                python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])'
+                            ''',
+                            returnStdout: true
+                        ).trim()
+                    }
+                }
+}
+
            stage('Install Dependencies') {
             steps {
                 dir("${env.APP_DIR}") {

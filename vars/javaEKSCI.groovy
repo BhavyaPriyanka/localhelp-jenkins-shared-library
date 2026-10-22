@@ -26,7 +26,7 @@ def call(Map configMap) {
             COMPONENT = "${component}"
             PROJECT_NAME = "${project}"
             SONAR_PROJECT_KEY = "${sonarProjectKey}"
-            CD_JOB_NAME = 'javaEKS-CD'
+            CD_JOB_NAME = 'backend-CD'
         }
 
         stages {

@@ -197,17 +197,83 @@ def call(Map configMap) {
                     }
                 }
             }
-
-          stage('SonarQube Quality Gate') {
+stage('SonarQube Quality Gate') {
     steps {
         script {
-            def qg
-            timeout(time: 10, unit: 'MINUTES') {
-                qg = waitForQualityGate()
-            }
-            echo "Quality Gate status: ${qg.status}"
-            if (qg.status != 'OK') {
-                error "Quality Gate failed: ${qg.status}"
+            withSonarQubeEnv('SonarQube') {
+                withCredentials([
+                    string(
+                        credentialsId: 'sonarqube-token',
+                        variable: 'SONAR_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        set -eu
+
+                        TASK_FILE=$(find . -path '*/.scannerwork/report-task.txt' \
+                            -o -path '*/target/sonar/report-task.txt' \
+                            | head -1)
+
+                        if [ -z "$TASK_FILE" ]; then
+                            echo "ERROR: Sonar report-task.txt not found"
+                            exit 1
+                        fi
+
+                        CE_TASK_URL=$(sed -n 's/^ceTaskUrl=//p' "$TASK_FILE")
+
+                        if [ -z "$CE_TASK_URL" ]; then
+                            echo "ERROR: ceTaskUrl not found"
+                            exit 1
+                        fi
+
+                        for i in $(seq 1 30); do
+                            RESPONSE=$(curl -fsS -u "$SONAR_TOKEN:" "$CE_TASK_URL") || {
+                                sleep 10
+                                continue
+                            }
+
+                            STATUS=$(printf '%s' "$RESPONSE" |
+                                python3 -c 'import json,sys; print(json.load(sys.stdin)["task"]["status"])')
+
+                            echo "SonarQube task status: $STATUS"
+
+                            if [ "$STATUS" = "SUCCESS" ]; then
+                                break
+                            fi
+
+                            if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELED" ]; then
+                                echo "ERROR: SonarQube analysis task failed"
+                                exit 1
+                            fi
+
+                            sleep 10
+                        done
+
+                        if [ "$STATUS" != "SUCCESS" ]; then
+                            echo "ERROR: SonarQube analysis timed out"
+                            exit 1
+                        fi
+
+                        ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
+                            python3 -c 'import json,sys; print(json.load(sys.stdin)["task"].get("analysisId", ""))')
+
+                        if [ -z "$ANALYSIS_ID" ]; then
+                            echo "ERROR: Analysis ID not found"
+                            exit 1
+                        fi
+
+                        GATE=$(curl -fsS -u "$SONAR_TOKEN:" \
+                            "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID" |
+                            python3 -c 'import json,sys; print(json.load(sys.stdin)["projectStatus"]["status"])')
+
+                        echo "SonarQube Quality Gate: $GATE"
+
+                        if [ "$GATE" != "OK" ]; then
+                            echo "ERROR: Quality Gate failed"
+                            exit 1
+                        fi
+                    '''
+                }
             }
         }
     }

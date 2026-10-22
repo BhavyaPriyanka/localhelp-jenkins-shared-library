@@ -1,6 +1,5 @@
-def call(Map configMap) {
 
-    def version
+def call(Map configMap) {
 
     pipeline {
 
@@ -25,8 +24,7 @@ def call(Map configMap) {
             stage('Initialize Version') {
                 steps {
                     script {
-                        version = env.BUILD_NUMBER
-                        env.IMAGE_VERSION = version
+                        env.IMAGE_VERSION = env.BUILD_NUMBER
                     }
 
                     echo "Application: ${env.APP_NAME}"
@@ -38,7 +36,7 @@ def call(Map configMap) {
                 steps {
                     dir('frontend') {
                         sh '''
-                            set -e
+                            set -eu
 
                             echo "===== INSTALLING NPM DEPENDENCIES ====="
 
@@ -53,11 +51,141 @@ def call(Map configMap) {
                 }
             }
 
+            stage('SonarQube Analysis') {
+                steps {
+                    dir('frontend') {
+                        withSonarQubeEnv('SonarQube') {
+                            sh '''
+                                set -eu
+
+                                echo "===== FRONTEND SONARQUBE ANALYSIS ====="
+
+                                sonar-scanner \
+                                    -Dsonar.projectKey=localhelp-frontend \
+                                    -Dsonar.projectName=localhelp-frontend \
+                                    -Dsonar.projectVersion="${IMAGE_VERSION}" \
+                                    -Dsonar.sources=src \
+                                    -Dsonar.exclusions="node_modules/**,build/**,coverage/**" \
+                                    -Dsonar.sourceEncoding=UTF-8
+
+                                test -f .scannerwork/report-task.txt
+
+                                echo "===== SONARQUBE ANALYSIS SUBMITTED ====="
+                            '''
+                        }
+                    }
+                }
+            }
+
+            stage('SonarQube Quality Gate') {
+                steps {
+                    script {
+                        withSonarQubeEnv('SonarQube') {
+                            withCredentials([
+                                string(
+                                    credentialsId: 'sonarqube-token',
+                                    variable: 'SONAR_TOKEN'
+                                )
+                            ]) {
+                                sh '''
+                                    set -eu
+
+                                    TASK_FILE="frontend/.scannerwork/report-task.txt"
+
+                                    if [ ! -f "$TASK_FILE" ]; then
+                                        echo "ERROR: Sonar report-task.txt not found"
+                                        exit 1
+                                    fi
+
+                                    CE_TASK_URL=$(sed -n 's/^ceTaskUrl=//p' "$TASK_FILE")
+
+                                    if [ -z "$CE_TASK_URL" ]; then
+                                        echo "ERROR: ceTaskUrl not found"
+                                        exit 1
+                                    fi
+
+                                    STATUS="PENDING"
+                                    RESPONSE=""
+
+                                    for i in $(seq 1 30); do
+                                        if RESPONSE=$(curl -fsS \
+                                            --connect-timeout 10 \
+                                            --max-time 30 \
+                                            -u "$SONAR_TOKEN:" \
+                                            "$CE_TASK_URL"); then
+
+                                            STATUS=$(printf '%s' "$RESPONSE" |
+                                                python3 -c '
+import json,sys
+print(json.load(sys.stdin)["task"]["status"])
+')
+
+                                            echo "SonarQube task status: $STATUS"
+
+                                            if [ "$STATUS" = "SUCCESS" ]; then
+                                                break
+                                            fi
+
+                                            if [ "$STATUS" = "FAILED" ] ||
+                                               [ "$STATUS" = "CANCELED" ]; then
+                                                echo "ERROR: SonarQube analysis task failed"
+                                                exit 1
+                                            fi
+                                        else
+                                            echo "SonarQube task request failed; retrying"
+                                        fi
+
+                                        sleep 10
+                                    done
+
+                                    if [ "$STATUS" != "SUCCESS" ]; then
+                                        echo "ERROR: SonarQube analysis timed out"
+                                        exit 1
+                                    fi
+
+                                    ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
+                                        python3 -c '
+import json,sys
+print(json.load(sys.stdin)["task"].get("analysisId", ""))
+')
+
+                                    if [ -z "$ANALYSIS_ID" ]; then
+                                        echo "ERROR: Analysis ID not found"
+                                        exit 1
+                                    fi
+
+                                    GATE_RESPONSE=$(curl -fsS \
+                                        --connect-timeout 10 \
+                                        --max-time 30 \
+                                        -u "$SONAR_TOKEN:" \
+                                        "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
+
+                                    GATE=$(printf '%s' "$GATE_RESPONSE" |
+                                        python3 -c '
+import json,sys
+print(json.load(sys.stdin)["projectStatus"]["status"])
+')
+
+                                    echo "SonarQube Quality Gate: $GATE"
+
+                                    if [ "$GATE" != "OK" ]; then
+                                        echo "ERROR: Quality Gate failed"
+                                        exit 1
+                                    fi
+
+                                    echo "===== FRONTEND QUALITY GATE PASSED ====="
+                                '''
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Build React Application') {
                 steps {
                     dir('frontend') {
                         sh '''
-                            set -e
+                            set -eu
 
                             echo "===== BUILDING REACT APPLICATION ====="
 
@@ -77,7 +205,7 @@ def call(Map configMap) {
                 steps {
                     dir('frontend') {
                         sh '''
-                            set -e
+                            set -eu
 
                             echo "===== PREPARING FRONTEND ARTIFACT ====="
 
@@ -97,7 +225,7 @@ def call(Map configMap) {
                 steps {
                     dir('frontend') {
                         sh '''
-                            set -e
+                            set -eu
 
                             IMAGE_URI="${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${IMAGE_VERSION}"
 
@@ -110,10 +238,10 @@ def call(Map configMap) {
                                 -t "$IMAGE_URI" \
                                 .
 
-                            echo "===== DOCKER IMAGE CREATED ====="
-
                             docker image inspect "$IMAGE_URI" \
                                 --format='Image ID: {{.Id}}'
+
+                            echo "===== DOCKER IMAGE CREATED ====="
                         '''
                     }
                 }
@@ -122,7 +250,7 @@ def call(Map configMap) {
             stage('ECR Login') {
                 steps {
                     sh '''
-                        set -e
+                        set -eu
 
                         echo "===== LOGIN TO ECR ====="
 
@@ -141,7 +269,7 @@ def call(Map configMap) {
             stage('Push Image to ECR') {
                 steps {
                     sh '''
-                        set -e
+                        set -eu
 
                         IMAGE_URI="${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${IMAGE_VERSION}"
 
@@ -159,7 +287,8 @@ def call(Map configMap) {
                             --query 'imageDetails[0].imageDigest' \
                             --output text)
 
-                        if [ -z "$IMAGE_DIGEST" ] || [ "$IMAGE_DIGEST" = "None" ]; then
+                        if [ -z "$IMAGE_DIGEST" ] ||
+                           [ "$IMAGE_DIGEST" = "None" ]; then
                             echo "ERROR: Image tag not found in ECR"
                             exit 1
                         fi
@@ -175,7 +304,7 @@ def call(Map configMap) {
                 steps {
                     dir('frontend') {
                         sh '''
-                            set -e
+                            set -eu
 
                             ARTIFACT="frontend-${IMAGE_VERSION}.zip"
                             S3_PATH="s3://localhelp-frontend-artifacts/frontend/${IMAGE_VERSION}/${ARTIFACT}"
@@ -186,11 +315,8 @@ def call(Map configMap) {
 
                             aws s3 cp "$ARTIFACT" "$S3_PATH"
 
-                            echo "===== VERIFYING S3 ARTIFACT ====="
-
                             aws s3 ls \
-                                "s3://localhelp-frontend-artifacts/frontend/${IMAGE_VERSION}/" \
-                                --recursive
+                                "s3://localhelp-frontend-artifacts/frontend/${IMAGE_VERSION}/"
 
                             echo "===== S3 UPLOAD SUCCESSFUL ====="
                         '''
@@ -211,7 +337,6 @@ def call(Map configMap) {
         }
 
         post {
-
             always {
                 echo "===== CLEANING WORKSPACE ====="
                 deleteDir()

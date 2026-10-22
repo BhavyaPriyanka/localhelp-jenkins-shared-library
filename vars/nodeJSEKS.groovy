@@ -125,11 +125,7 @@ stage('SonarQube Analysis') {
                                             -u "$SONAR_TOKEN:" \
                                             "$CE_TASK_URL"); then
 
-                                            STATUS=$(printf '%s' "$RESPONSE" |
-                                                python3 -c '
-                                            import json,sys
-                                            print(json.load(sys.stdin)["task"]["status"])
-                                            ')
+                                            STATUS=$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"]["status"])')
 
                                             echo "SonarQube task status: $STATUS"
 

@@ -1,4 +1,3 @@
-
 def call(Map configMap = [:]) {
     def gitopsRepo = configMap.get('gitopsRepo') ?:
         'https://github.com/BhavyaPriyanka/Gitops-ArgoCD.git'
@@ -55,6 +54,7 @@ def call(Map configMap = [:]) {
                         echo "Image: ${env.ECR_IMAGE}:${env.DEPLOY_IMAGE_TAG}"
                         echo "GitOps repository: ${env.GITOPS_REPO}"
                         echo "GitOps branch: ${env.GITOPS_BRANCH}"
+                        echo "Values file: ${env.VALUES_FILE}"
                     }
                 }
             }
@@ -81,7 +81,6 @@ def call(Map configMap = [:]) {
 
                             grep -Fq "$ECR_IMAGE" "$VALUES_FILE" || {
                                 echo "ERROR: Expected backend ECR repository not found."
-                                echo "Check $VALUES_FILE; frontend values must not be used."
                                 exit 1
                             }
 
@@ -110,6 +109,7 @@ def call(Map configMap = [:]) {
                             grep -nE '^[[:space:]]*(image|imageVersion):' "$VALUES_FILE"
 
                             grep -Fq "$ECR_IMAGE" "$VALUES_FILE"
+
                             grep -Eq \
                               "^[[:space:]]*imageVersion:[[:space:]]*${DEPLOY_IMAGE_TAG}[[:space:]]*$" \
                               "$VALUES_FILE"
@@ -135,7 +135,7 @@ def call(Map configMap = [:]) {
                                 git config user.email "localhelp-ci@users.noreply.github.com"
 
                                 if git diff --quiet -- "$VALUES_FILE"; then
-                                    echo "GitOps already references this image tag. No commit needed."
+                                    echo "GitOps already references this image tag."
                                     exit 0
                                 fi
 
@@ -144,26 +144,24 @@ def call(Map configMap = [:]) {
                                 git commit -m \
                                   "chore(backend): update image to ${DEPLOY_IMAGE_TAG}"
 
-                                # Authenticate without putting the token in the Git URL.
                                 ASKPASS_FILE="$(pwd)/.git-askpass.sh"
+                                trap 'rm -f "$ASKPASS_FILE"' EXIT
 
-                                cat > "$ASKPASS_FILE" <<'ASKPASS'
-                                #!/bin/sh
-                                case "$1" in
-                                    *Username*) printf '%s\\n' "$GIT_USERNAME" ;;
-                                    *Password*) printf '%s\\n' "$GIT_TOKEN" ;;
-                                    *) exit 1 ;;
-                                esac
-                                ASKPASS
+                                printf '%s\\n' \
+                                  '#!/bin/sh' \
+                                  'case "$1" in' \
+                                  '  *Username*) printf "%s\\n" "$GIT_USERNAME" ;;' \
+                                  '  *Password*) printf "%s\\n" "$GIT_TOKEN" ;;' \
+                                  '  *) exit 1 ;;' \
+                                  'esac' > "$ASKPASS_FILE"
 
                                 chmod 700 "$ASKPASS_FILE"
 
                                 export GIT_ASKPASS="$ASKPASS_FILE"
                                 export GIT_TERMINAL_PROMPT=0
 
-                                git push origin "$GITOPS_BRANCH"
-
-                                rm -f "$ASKPASS_FILE"
+                                echo "Pushing GitOps commit to origin/$GITOPS_BRANCH"
+                                git push origin "HEAD:$GITOPS_BRANCH"
 
                                 echo "GitOps update pushed successfully."
                             '''
@@ -175,12 +173,12 @@ def call(Map configMap = [:]) {
 
         post {
             success {
-                echo "CD handoff successful: ${env.ECR_IMAGE}:${env.DEPLOY_IMAGE_TAG}"
-                echo "GitOps was updated. Argo CD is responsible for syncing the deployment."
+                echo "Backend CD handoff completed for ${env.ECR_IMAGE}:${env.DEPLOY_IMAGE_TAG}"
+                echo "Verify the GitOps commit and Argo CD sync status."
             }
 
             failure {
-                echo 'CD handoff failed. Check the GitOps checkout, credentials, and image configuration.'
+                echo 'Backend CD failed. Check the stage logs; the GitOps push may not have completed.'
             }
 
             always {

@@ -123,8 +123,11 @@ def call(Map configMap) {
                                             -u "$SONAR_TOKEN:" \
                                             "$CE_TASK_URL"); then
 
-                                            STATUS=$(printf '%s\n' "$RESPONSE" |
-                                                sed -n 's/.*"task"[[:space:]]*:[[:space:]]*{[^}]*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+                                            STATUS=$(printf '%s\n' "$RESPONSE" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+
+ANALYSIS_ID=$(printf '%s\n' "$RESPONSE" | sed -n 's/.*"analysisId":"\([^"]*\)".*/\1/p')
+
+GATE=$(printf '%s\n' "$GATE_RESPONSE" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
 
                                             echo "SonarQube task status: $STATUS"
 

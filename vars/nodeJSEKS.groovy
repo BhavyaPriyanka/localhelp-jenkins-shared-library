@@ -22,7 +22,7 @@ def call(Map configMap) {
 
         stages {
 
-            sstage('Install Dependencies') {
+            stage('Install Dependencies') {
                 steps {
                     dir('frontend') {
                         sh '''

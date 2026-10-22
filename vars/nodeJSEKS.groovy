@@ -185,6 +185,26 @@ def call(Map configMap) {
                 }
             }
 
+
+            stage('Build Frontend Image') {
+                    steps {
+                        dir('frontend') {
+                            sh '''
+                                set -eu
+
+                                IMAGE_URI="${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${IMAGE_VERSION}"
+
+                                echo "===== BUILDING FRONTEND IMAGE ====="
+
+                                docker build -t "$IMAGE_URI" .
+
+                                docker image inspect "$IMAGE_URI"
+
+                                echo "===== FRONTEND IMAGE BUILT ====="
+                            '''
+                        }
+                    }
+                                        }
             stage('ECR Login') {
                 steps {
                     sh '''

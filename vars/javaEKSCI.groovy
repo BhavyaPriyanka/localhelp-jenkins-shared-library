@@ -198,21 +198,20 @@ def call(Map configMap) {
                 }
             }
 
-            stage('SonarQube Quality Gate') {
-                steps {
-                    timeout(time: 5, unit: 'MINUTES') {
-                        script {
-                            def qualityGate = waitForQualityGate()
-
-                            if (qualityGate.status != 'OK') {
-                                error "SonarQube Quality Gate failed: ${qualityGate.status}"
-                            }
-
-                            echo "SonarQube Quality Gate: ${qualityGate.status}"
-                        }
-                    }
-                }
+          stage('SonarQube Quality Gate') {
+    steps {
+        script {
+            def qg
+            timeout(time: 10, unit: 'MINUTES') {
+                qg = waitForQualityGate()
             }
+            echo "Quality Gate status: ${qg.status}"
+            if (qg.status != 'OK') {
+                error "Quality Gate failed: ${qg.status}"
+            }
+        }
+    }
+}
 
             stage('Build Docker Image') {
                 steps {

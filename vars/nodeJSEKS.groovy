@@ -127,9 +127,9 @@ stage('SonarQube Analysis') {
 
                                             STATUS=$(printf '%s' "$RESPONSE" |
                                                 python3 -c '
-import json,sys
-print(json.load(sys.stdin)["task"]["status"])
-')
+                                            import json,sys
+                                            print(json.load(sys.stdin)["task"]["status"])
+                                            ')
 
                                             echo "SonarQube task status: $STATUS"
 
@@ -156,9 +156,9 @@ print(json.load(sys.stdin)["task"]["status"])
 
                                     ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
                                         python3 -c '
-import json,sys
-print(json.load(sys.stdin)["task"].get("analysisId", ""))
-')
+                        import json,sys
+                        print(json.load(sys.stdin)["task"].get("analysisId", ""))
+                        ')
 
                                     if [ -z "$ANALYSIS_ID" ]; then
                                         echo "ERROR: Analysis ID not found"
@@ -173,9 +173,9 @@ print(json.load(sys.stdin)["task"].get("analysisId", ""))
 
                                     GATE=$(printf '%s' "$GATE_RESPONSE" |
                                         python3 -c '
-import json,sys
-print(json.load(sys.stdin)["projectStatus"]["status"])
-')
+                                                import json,sys
+                                                print(json.load(sys.stdin)["projectStatus"]["status"])
+                                                ')
 
                                     echo "SonarQube Quality Gate: $GATE"
 
@@ -334,6 +334,24 @@ print(json.load(sys.stdin)["projectStatus"]["status"])
                     }
                 }
             }
+
+            stage('Trigger Frontend CD') {
+                    steps {
+                        script {
+                            echo "Triggering frontend CD for image tag: ${env.IMAGE_VERSION}"
+
+                              build job: 'frontend-CD',
+                                    wait: true,
+                                    propagate: true,
+                                    parameters: [
+                                        string(
+                                            name: 'IMAGE_TAG',
+                                            value: env.IMAGE_VERSION
+                                        )
+                                    ]
+                            }
+                    }
+}
 
             stage('CI Success') {
                 steps {

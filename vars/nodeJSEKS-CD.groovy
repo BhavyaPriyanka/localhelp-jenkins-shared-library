@@ -110,7 +110,6 @@ def call(Map configMap = [:]) {
                     dir('gitops') {
                         sh '''
                             set -eu
-
                             export DEPLOY_IMAGE_TAG TARGET_GROUP_ARN
 
                             python3 - <<'PY'
@@ -118,8 +117,7 @@ import os
 from pathlib import Path
 
 path = Path(os.environ["VALUES_FILE"])
-text = path.read_text()
-lines = text.splitlines()
+lines = path.read_text().splitlines()
 
 image_count = 0
 arn_count = 0

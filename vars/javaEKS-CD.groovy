@@ -148,13 +148,13 @@ def call(Map configMap = [:]) {
                                 ASKPASS_FILE="$(pwd)/.git-askpass.sh"
 
                                 cat > "$ASKPASS_FILE" <<'ASKPASS'
-#!/bin/sh
-case "$1" in
-    *Username*) printf '%s\\n' "$GIT_USERNAME" ;;
-    *Password*) printf '%s\\n' "$GIT_TOKEN" ;;
-    *) exit 1 ;;
-esac
-ASKPASS
+                                #!/bin/sh
+                                case "$1" in
+                                    *Username*) printf '%s\\n' "$GIT_USERNAME" ;;
+                                    *Password*) printf '%s\\n' "$GIT_TOKEN" ;;
+                                    *) exit 1 ;;
+                                esac
+                                ASKPASS
 
                                 chmod 700 "$ASKPASS_FILE"
 

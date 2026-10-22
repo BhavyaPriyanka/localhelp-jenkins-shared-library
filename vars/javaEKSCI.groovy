@@ -73,25 +73,65 @@ def call(Map configMap) {
                 }
             }
 
-            stage('Load DB Credentials') {
-                steps {
-                    script {
-                        env.DB_HOST = 'db-dev.localhelp.store'
-                        env.DB_USERNAME = 'root'
+       stage('Load DB Credentials') {
+    steps {
+        script {
+            def region = 'us-east-1'
+            def dbInstance = 'localhelp-dev'
 
-                        env.DB_PASSWORD = sh(
-                            script: '''
-                                aws secretsmanager get-secret-value \
-                                --secret-id 'YOUR_RDS_SECRET_ARN' \
-                                --region us-east-1 \
-                                --query SecretString \
-                                --output text |
-                                python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])'
-                            ''',
-                            returnStdout: true
-                        ).trim()
-                    }
-                }
+            // Dynamically discover the RDS endpoint
+            env.DB_HOST = sh(
+                script: """
+                    aws rds describe-db-instances \
+                      --db-instance-identifier '${dbInstance}' \
+                      --region '${region}' \
+                      --query 'DBInstances[0].Endpoint.Address' \
+                      --output text
+                """,
+                returnStdout: true
+            ).trim()
+
+            // Dynamically discover the AWS-managed secret ARN
+            def secretArn = sh(
+                script: """
+                    aws rds describe-db-instances \
+                      --db-instance-identifier '${dbInstance}' \
+                      --region '${region}' \
+                      --query 'DBInstances[0].MasterUserSecret.SecretArn' \
+                      --output text
+                """,
+                returnStdout: true
+            ).trim()
+
+            if (!secretArn || secretArn == 'None' ||
+                !env.DB_HOST || env.DB_HOST == 'None') {
+                error('Unable to discover RDS endpoint or master secret ARN')
+            }
+
+            // Retrieve credentials without printing them to the console
+            def secretJson = sh(
+                script: """
+                    aws secretsmanager get-secret-value \
+                      --secret-id '${secretArn}' \
+                      --region '${region}' \
+                      --query SecretString \
+                      --output text
+                """,
+                returnStdout: true
+            ).trim()
+
+            def credentials = new groovy.json.JsonSlurperClassic()
+                .parseText(secretJson)
+
+            env.DB_USERNAME = credentials.username
+            env.DB_PASSWORD = credentials.password
+
+            secretJson = null
+            credentials = null
+
+            echo 'RDS endpoint discovered and credentials loaded successfully.'
+        }
+    }
 }
 
            stage('Install Dependencies') {

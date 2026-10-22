@@ -1,6 +1,4 @@
-
 def call(Map configMap) {
-
     pipeline {
         agent {
             label 'AGENT-1'
@@ -60,6 +58,11 @@ def call(Map configMap) {
                                         set -eu
                                         echo "===== FRONTEND SONARQUBE ANALYSIS ====="
 
+                                        test -d src || {
+                                            echo "ERROR: frontend/src directory not found"
+                                            exit 1
+                                        }
+
                                         sonar-scanner \
                                             -Dsonar.projectKey=localhelp-frontend \
                                             -Dsonar.projectName=localhelp-frontend \
@@ -92,12 +95,14 @@ def call(Map configMap) {
                                     set -eu
 
                                     TASK_FILE="frontend/.scannerwork/report-task.txt"
+
                                     test -f "$TASK_FILE" || {
                                         echo "ERROR: Sonar report-task.txt not found"
                                         exit 1
                                     }
 
-                                    CE_TASK_URL=$(sed -n 's/^ceTaskUrl=//p' "$TASK_FILE")
+                                    CE_TASK_URL=$(awk -F= '$1 == "ceTaskUrl" {print substr($0, index($0, "=") + 1); exit}' "$TASK_FILE")
+
                                     test -n "$CE_TASK_URL" || {
                                         echo "ERROR: ceTaskUrl not found"
                                         exit 1
@@ -114,7 +119,14 @@ def call(Map configMap) {
                                             "$CE_TASK_URL"); then
 
                                             STATUS=$(printf '%s' "$RESPONSE" |
-                                                sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+                                                awk -F'"' '{
+                                                    for (i = 1; i < NF; i++) {
+                                                        if ($i == "status" && $(i + 1) == ":") {
+                                                            print $(i + 2)
+                                                            exit
+                                                        }
+                                                    }
+                                                }')
 
                                             echo "SonarQube task status: $STATUS"
 
@@ -140,7 +152,14 @@ def call(Map configMap) {
                                     fi
 
                                     ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
-                                        sed -n 's/.*"analysisId"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+                                        awk -F'"' '{
+                                            for (i = 1; i < NF; i++) {
+                                                if ($i == "analysisId" && $(i + 1) == ":") {
+                                                    print $(i + 2)
+                                                    exit
+                                                }
+                                            }
+                                        }')
 
                                     test -n "$ANALYSIS_ID" || {
                                         echo "ERROR: Analysis ID not found"
@@ -154,7 +173,18 @@ def call(Map configMap) {
                                         "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
 
                                     GATE=$(printf '%s' "$GATE_RESPONSE" |
-                                        sed -n 's/.*"projectStatus"[[:space:]]*:[[:space:]]*{[^}]*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+                                        awk -F'"' '{
+                                            in_project_status = 0
+
+                                            for (i = 1; i < NF; i++) {
+                                                if ($i == "projectStatus" && $(i + 1) == ":") {
+                                                    in_project_status = 1
+                                                } else if (in_project_status && $i == "status" && $(i + 1) == ":") {
+                                                    print $(i + 2)
+                                                    exit
+                                                }
+                                            }
+                                        }')
 
                                     echo "SonarQube Quality Gate: $GATE"
 
@@ -171,6 +201,32 @@ def call(Map configMap) {
                 }
             }
 
+            stage('Build Frontend Application') {
+                steps {
+                    dir('frontend') {
+                        sh '''
+                            set -eu
+
+                            echo "===== BUILDING FRONTEND APPLICATION ====="
+
+                            npm run build
+
+                            if [ -d dist ]; then
+                                echo "Build output found: dist/"
+                            elif [ -d build ]; then
+                                echo "Build output found: build/"
+                            else
+                                echo "ERROR: Build completed but neither dist/ nor build/ exists"
+                                echo "Check the output directory configured by package.json"
+                                exit 1
+                            fi
+
+                            echo "===== FRONTEND APPLICATION BUILD COMPLETE ====="
+                        '''
+                    }
+                }
+            }
+
             stage('Build Frontend Image') {
                 steps {
                     dir('frontend') {
@@ -180,6 +236,7 @@ def call(Map configMap) {
                             IMAGE_URI="${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${IMAGE_VERSION}"
 
                             echo "===== BUILDING FRONTEND IMAGE ====="
+
                             test -f Dockerfile || {
                                 echo "ERROR: frontend/Dockerfile not found"
                                 exit 1
@@ -188,6 +245,7 @@ def call(Map configMap) {
                             docker build -t "$IMAGE_URI" .
                             docker image inspect "$IMAGE_URI"
 
+                            echo "Built image: $IMAGE_URI"
                             echo "===== FRONTEND IMAGE BUILT ====="
                         '''
                     }
@@ -207,21 +265,22 @@ def call(Map configMap) {
                             elif [ -d build ]; then
                                 BUILD_DIR="build"
                             else
-                                echo "ERROR: Neither dist/ nor build/ exists."
-                                echo "Check your frontend build script."
+                                echo "ERROR: Neither dist/ nor build/ exists"
                                 exit 1
                             fi
 
                             command -v zip >/dev/null 2>&1 || {
-                                echo "ERROR: zip utility is not installed on the Jenkins agent."
+                                echo "ERROR: zip utility is not installed on the Jenkins agent"
                                 exit 1
                             }
 
                             ARTIFACT="frontend-${IMAGE_VERSION}.zip"
+
                             rm -f "$ARTIFACT"
                             zip -rq "$ARTIFACT" "$BUILD_DIR"
 
                             test -s "$ARTIFACT"
+
                             echo "Created artifact: $ARTIFACT"
                             ls -lh "$ARTIFACT"
                         '''
@@ -256,6 +315,7 @@ def call(Map configMap) {
                         IMAGE_URI="${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${IMAGE_VERSION}"
 
                         echo "===== PUSHING FRONTEND IMAGE ====="
+
                         docker image inspect "$IMAGE_URI"
                         docker push "$IMAGE_URI"
 
@@ -293,8 +353,11 @@ def call(Map configMap) {
                             echo "===== UPLOADING FRONTEND ARTIFACT TO S3 ====="
 
                             test -s "$ARTIFACT"
+
                             aws s3 cp "$ARTIFACT" "$S3_PATH"
-                            aws s3 ls "s3://localhelp-frontend-artifacts/frontend/${IMAGE_VERSION}/"
+
+                            aws s3 ls \
+                                "s3://localhelp-frontend-artifacts/frontend/${IMAGE_VERSION}/"
 
                             echo "===== S3 UPLOAD SUCCESSFUL ====="
                         '''

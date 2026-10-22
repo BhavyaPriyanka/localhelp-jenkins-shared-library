@@ -35,67 +35,49 @@ def call(Map configMap) {
                 }
 }
 
-            stage('Build React Application') {
+           stage('Build React Application') {
                 steps {
-                    sh '''
-                        set -e
-
-                        echo "===== BUILDING REACT APPLICATION ====="
-
-                        npm run build
-
-                        echo "===== VERIFYING BUILD OUTPUT ====="
-
-                        test -d build
-                        test -n "$(ls -A build)"
-
-                        ls -lh build
-
-                        echo "===== REACT BUILD SUCCESSFUL ====="
-                    '''
+                    dir('frontend') {
+                        sh '''
+                            set -e
+                            echo "===== BUILDING REACT APPLICATION ====="
+                            npm run build
+                            test -d build
+                            ls -lh build
+                            echo "===== REACT BUILD SUCCESSFUL ====="
+                        '''
+                    }
                 }
-            }
+}
 
             stage('Prepare Artifact') {
                 steps {
-                    script {
-                        version = env.BUILD_NUMBER
+                    dir('frontend') {
+                        sh '''
+                            set -e
+                            echo "===== PREPARING FRONTEND ARTIFACT ====="
+                            zip -r "frontend-${BUILD_NUMBER}.zip" build
+                            test -s "frontend-${BUILD_NUMBER}.zip"
+                            ls -lh "frontend-${BUILD_NUMBER}.zip"
+                        '''
                     }
-
-                    sh '''
-                        set -e
-
-                        echo "===== PREPARING FRONTEND ARTIFACT ====="
-
-                        zip -r frontend-${BUILD_NUMBER}.zip build
-
-                        test -s frontend-${BUILD_NUMBER}.zip
-
-                        ls -lh frontend-${BUILD_NUMBER}.zip
-
-                        echo "===== ARTIFACT CREATED ====="
-                    '''
                 }
-            }
+}
 
             stage('Docker Build') {
-                steps {
+            steps {
+                dir('frontend') {
                     sh '''
                         set -e
-
                         echo "===== BUILDING FRONTEND DOCKER IMAGE ====="
-
                         docker build --no-cache \
                             -t "${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${BUILD_NUMBER}" \
                             .
-
                         echo "===== DOCKER IMAGE CREATED ====="
-
-                        docker images \
-                            "${account_id}.dkr.ecr.${region}.amazonaws.com/${ECR_REPO}:${BUILD_NUMBER}"
                     '''
                 }
             }
+}
 
             stage('ECR Login') {
                 steps {
@@ -145,24 +127,23 @@ def call(Map configMap) {
 
             stage('Upload Artifact to S3') {
                 steps {
-                    sh '''
-                        set -e
+                    dir('frontend') {
+                        sh '''
+                            set -e
+                            echo "===== UPLOADING FRONTEND ARTIFACT TO S3 ====="
 
-                        echo "===== UPLOADING FRONTEND ARTIFACT TO S3 ====="
+                            aws s3 cp \
+                                "frontend-${BUILD_NUMBER}.zip" \
+                                "s3://localhelp-frontend-artifacts/frontend/${BUILD_NUMBER}/frontend-${BUILD_NUMBER}.zip"
 
-                        aws s3 cp \
-                            "frontend-${BUILD_NUMBER}.zip" \
-                            "s3://localhelp-frontend-artifacts/frontend/${BUILD_NUMBER}/frontend-${BUILD_NUMBER}.zip"
+                            aws s3 ls \
+                                "s3://localhelp-frontend-artifacts/frontend/${BUILD_NUMBER}/"
 
-                        echo "===== VERIFYING S3 ARTIFACT ====="
-
-                        aws s3 ls \
-                            "s3://localhelp-frontend-artifacts/frontend/${BUILD_NUMBER}/"
-
-                        echo "===== S3 UPLOAD SUCCESSFUL ====="
-                    '''
+                            echo "===== S3 UPLOAD SUCCESSFUL ====="
+                        '''
+                    }
                 }
-            }
+}
 
             stage('CI Success') {
                 steps {

@@ -51,31 +51,42 @@ def call(Map configMap) {
                 }
             }
 
-            stage('SonarQube Analysis') {
-                steps {
+            
+stage('SonarQube Analysis') {
+    steps {
+        script {
+            def scannerHome = tool(
+                name: 'SonarScanner',
+                type: 'hudson.plugins.sonar.SonarRunnerInstallation'
+            )
+
+            withSonarQubeEnv('SonarQube') {
+                withEnv(["PATH+SONAR_SCANNER=${scannerHome}/bin"]) {
                     dir('frontend') {
-                        withSonarQubeEnv('SonarQube') {
-                            sh '''
-                                set -eu
+                        sh '''
+                            set -eu
 
-                                echo "===== FRONTEND SONARQUBE ANALYSIS ====="
+                            echo "===== FRONTEND SONARQUBE ANALYSIS ====="
 
-                                sonar-scanner \
-                                    -Dsonar.projectKey=localhelp-frontend \
-                                    -Dsonar.projectName=localhelp-frontend \
-                                    -Dsonar.projectVersion="${IMAGE_VERSION}" \
-                                    -Dsonar.sources=src \
-                                    -Dsonar.exclusions="node_modules/**,build/**,coverage/**" \
-                                    -Dsonar.sourceEncoding=UTF-8
+                            sonar-scanner \
+                                -Dsonar.projectKey=localhelp-frontend \
+                                -Dsonar.projectName=localhelp-frontend \
+                                -Dsonar.projectVersion="${IMAGE_VERSION}" \
+                                -Dsonar.sources=src \
+                                -Dsonar.exclusions="node_modules/**,build/**,coverage/**" \
+                                -Dsonar.sourceEncoding=UTF-8
 
-                                test -f .scannerwork/report-task.txt
+                            test -f .scannerwork/report-task.txt
 
-                                echo "===== SONARQUBE ANALYSIS SUBMITTED ====="
-                            '''
-                        }
+                            echo "===== SONARQUBE ANALYSIS SUBMITTED ====="
+                        '''
                     }
                 }
             }
+        }
+    }
+}
+
 
             stage('SonarQube Quality Gate') {
                 steps {

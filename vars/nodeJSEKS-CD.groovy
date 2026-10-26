@@ -67,10 +67,10 @@ def call(Map configMap = [:]) {
                             returnStdout: true
                         ).trim()
 
-                       if (!(env.TARGET_GROUP_ARN ==~
-    /^arn:aws:elasticloadbalancing:${env.AWS_REGION}:[0-9]{12}:targetgroup\/[A-Za-z0-9-]+\/[A-Fa-f0-9]+$/)) {
-    error "Could not resolve a valid Target Group ARN: ${env.TARGET_GROUP_ARN}"
-}
+                        if (!env.TARGET_GROUP_ARN.startsWith("arn:aws:elasticloadbalancing:${env.AWS_REGION}:") ||
+                            !env.TARGET_GROUP_ARN.contains(":targetgroup/")) {
+                            error "Could not resolve a valid Target Group ARN: ${env.TARGET_GROUP_ARN}"
+                        }
 
                         echo "Discovered frontend Target Group ARN: ${env.TARGET_GROUP_ARN}"
                     }

@@ -134,9 +134,26 @@ def call(Map configMap = [:]) {
                                 git config user.name "localhelp-ci"
                                 git config user.email "localhelp-ci@users.noreply.github.com"
 
+                                echo "DEBUG: GitOps branch=$GITOPS_BRANCH"
+                                echo "DEBUG: Values file=$VALUES_FILE"
+                                echo "DEBUG: Deploy tag=$DEPLOY_IMAGE_TAG"
+                                echo "DEBUG: Current branch=$(git branch --show-current)"
+                                echo "DEBUG: HEAD commit=$(git rev-parse HEAD)"
+                                echo "DEBUG: Values-file diff:"
+                                git diff -- "$VALUES_FILE"
+                                echo "DEBUG: Remote branch before push:"
+                                git ls-remote origin "refs/heads/$GITOPS_BRANCH"
+
                                 if git diff --quiet -- "$VALUES_FILE"; then
-                                    echo "GitOps already references this image tag."
-                                    exit 0
+                                    if grep -Eq \
+                                    "^[[:space:]]*imageVersion:[[:space:]]*${DEPLOY_IMAGE_TAG}[[:space:]]*$" \
+                                    "$VALUES_FILE"; then
+                                        echo "GitOps already references image tag $DEPLOY_IMAGE_TAG."
+                                        exit 0
+                                    else
+                                        echo "ERROR: No diff, but values file does not contain expected image tag."
+                                        exit 1
+                                    fi
                                 fi
 
                                 git add "$VALUES_FILE"

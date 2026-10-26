@@ -173,26 +173,14 @@ def call(Map configMap) {
                                         "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
 
                                     GATE=$(printf '%s' "$GATE_RESPONSE" |
-                                        awk -F'"' '{
-                                            in_project_status = 0
+                                            jq -r '.projectStatus.status // empty')
 
-                                            for (i = 1; i < NF; i++) {
-                                                if ($i == "projectStatus" && $(i + 1) == ":") {
-                                                    in_project_status = 1
-                                                } else if (in_project_status && $i == "status" && $(i + 1) == ":") {
-                                                    print $(i + 2)
-                                                    exit
-                                                }
-                                            }
-                                        }')
+                                        echo "SonarQube Quality Gate: $GATE"
 
-                                    echo "SonarQube Quality Gate: $GATE"
-
-                                    if [ "$GATE" != "OK" ]; then
-                                        echo "ERROR: Quality Gate failed or status could not be parsed"
-                                        exit 1
-                                    fi
-
+                                        if [ "$GATE" != "OK" ]; then
+                                            echo "ERROR: Quality Gate failed or status could not be parsed"
+                                            exit 1
+                                        fi
                                     echo "===== FRONTEND QUALITY GATE PASSED ====="
                                 '''
                             }

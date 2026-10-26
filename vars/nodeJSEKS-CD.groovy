@@ -78,19 +78,26 @@ def call(Map configMap = [:]) {
             }
 
             stage('Checkout GitOps Repository') {
-                steps {
-                    dir('gitops') {
+                     steps {
+                        dir('gitops') {
                         checkout([
                             $class: 'GitSCM',
                             branches: [[name: "*/${env.GITOPS_BRANCH}"]],
                             userRemoteConfigs: [[
                                 url: env.GITOPS_REPO,
                                 credentialsId: env.GITOPS_CREDENTIALS_ID
-                            ]]
+                            ]],
+                            extensions: [
+                                [$class: 'LocalBranch', localBranch: "${env.GITOPS_BRANCH}"]
+                            ]
                         ])
 
                         sh '''
                             set -eu
+                            echo "Current GitOps branch:"
+                            git branch --show-current
+                            git status --short --branch
+
                             test -f "$VALUES_FILE"
 
                             grep -Fq "$ECR_IMAGE" "$VALUES_FILE" || {
@@ -101,9 +108,9 @@ def call(Map configMap = [:]) {
                             test "$(grep -Ec '^[[:space:]]*imageVersion:' "$VALUES_FILE")" -eq 1
                             test "$(grep -Ec '^[[:space:]]*arn:' "$VALUES_FILE")" -eq 1
                         '''
-                    }
-                }
-            }
+        }
+    }
+}
 
             stage('Update Frontend GitOps Values') {
                 steps {

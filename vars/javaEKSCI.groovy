@@ -45,7 +45,7 @@ def call(Map configMap) {
                         env.BUILD_VERSION = (
                             gitTag
                                 ? gitTag.replaceFirst(/^v/, '')
-                                : : "sha-${commit}-${env.BUILD_NUMBER}"
+                                :  "sha-${commit}-${env.BUILD_NUMBER}"
                         ).toLowerCase().replaceAll(/[^a-z0-9_.-]/, '-')
 
                         echo "Build version: ${env.BUILD_VERSION}"

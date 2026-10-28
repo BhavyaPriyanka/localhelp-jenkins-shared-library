@@ -223,8 +223,10 @@ stage('SonarQube Quality Gate') {
                                 continue
                             }
 
-                            STATUS=$(printf '%s' "$RESPONSE" |
-    sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+                          STATUS=$(printf '%s' "$RESPONSE" |
+                            grep -o '"status":"[^"]*"' |
+                            head -1 |
+                            cut -d '"' -f4)
 
                             echo "SonarQube task status: $STATUS"
 
@@ -245,8 +247,10 @@ stage('SonarQube Quality Gate') {
                             exit 1
                         fi
 
-                        ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
-    sed -n 's/.*"analysisId":"\([^"]*\)".*/\1/p')
+                     ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
+                        grep -o '"analysisId":"[^"]*"' |
+                        head -1 |
+                        cut -d '"' -f4)
 
                         if [ -z "$ANALYSIS_ID" ]; then
                             echo "ERROR: Analysis ID not found"
@@ -254,10 +258,12 @@ stage('SonarQube Quality Gate') {
                         fi
 
                          GATE_RESPONSE=$(curl -fsS -u "$SONAR_TOKEN:" \
-                    "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
+                        "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
 
-                 GATE=$(printf '%s' "$GATE_RESPONSE" |
-                    sed -n 's/.*"projectStatus":{"status":"\([^"]*\)".*/\1/p')
+                    GATE=$(printf '%s' "$GATE_RESPONSE" |
+                        grep -o '"status":"[^"]*"' |
+                        head -1 |
+                        cut -d '"' -f4)
 
                         echo "SonarQube Quality Gate: $GATE"
 

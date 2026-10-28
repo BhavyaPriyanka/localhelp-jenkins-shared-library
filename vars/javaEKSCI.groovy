@@ -260,15 +260,11 @@ stage('SonarQube Quality Gate') {
                         echo "SonarQube host: $SONAR_HOST_URL"
                     echo "Quality Gate API URL: $SONAR_HOST_URL/api/qualitygates/project_status"
 
-                         GATE_RESPONSE=$(curl -fsS -u "$SONAR_TOKEN:" \
-                        "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
+                        echo "SonarQube host: $SONAR_HOST_URL"
 
-                    GATE=$(printf '%s' "$GATE_RESPONSE" |
-                        grep -o '"status":"[^"]*"' |
-                        head -1 |
-                        cut -d '"' -f4)
-
-                        echo "SonarQube Quality Gate: $GATE"
+curl -sS -L -u "$SONAR_TOKEN:" \
+    -w '\nHTTP_STATUS=%{http_code}\nCONTENT_TYPE=%{content_type}\n' \
+    "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID"
 
                         if [ "$GATE" != "OK" ]; then
                             echo "ERROR: Quality Gate failed"

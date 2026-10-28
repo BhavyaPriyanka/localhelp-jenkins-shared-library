@@ -53,8 +53,10 @@ def call(Map configMap) {
                             withEnv(["PATH+SONAR_SCANNER=${scannerHome}/bin"]) {
                                 dir('frontend') {
                                     sh '''
-                                        set -eu
-                                        echo "===== FRONTEND SONARQUBE ANALYSIS ====="
+                                    set -eu
+                                    export NODE_OPTIONS="--max-old-space-size=512"
+                                    echo "===== FRONTEND SONARQUBE ANALYSIS ====="
+                                    echo "Node.js heap limit: 512 MB"
 
                                         test -d src || {
                                             echo "ERROR: frontend/src directory not found"

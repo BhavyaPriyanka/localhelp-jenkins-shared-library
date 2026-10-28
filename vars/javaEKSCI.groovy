@@ -188,7 +188,7 @@ def call(Map configMap) {
                     }
                 }
             }
-stage('SonarQube Quality Gate') {
+                stage('SonarQube Quality Gate') {
     steps {
         script {
             withSonarQubeEnv('SonarQube') {
@@ -201,41 +201,44 @@ stage('SonarQube Quality Gate') {
                     sh '''
                         set -eu
 
-                        TASK_FILE=$(find . -path '*/.scannerwork/report-task.txt' \
+                        # Find the SonarQube report
+                        TASK_FILE=$(find . \
+                            -path '*/.scannerwork/report-task.txt' \
                             -o -path '*/target/sonar/report-task.txt' \
                             | head -1)
 
                         if [ -z "$TASK_FILE" ]; then
-                            echo "ERROR: Sonar report-task.txt not found"
+                            echo "ERROR: SonarQube report not found"
                             exit 1
                         fi
 
+                        # Get the background task URL
                         CE_TASK_URL=$(sed -n 's/^ceTaskUrl=//p' "$TASK_FILE")
 
-                        if [ -z "$CE_TASK_URL" ]; then
-                            echo "ERROR: ceTaskUrl not found"
-                            exit 1
-                        fi
+                        # Wait for SonarQube analysis to finish
+                        STATUS=""
 
                         for i in $(seq 1 30); do
-                            RESPONSE=$(curl -fsS -u "$SONAR_TOKEN:" "$CE_TASK_URL") || {
-                                sleep 10
-                                continue
-                            }
+                            RESPONSE=$(curl -fsS \
+                                -u "$SONAR_TOKEN:" "$CE_TASK_URL") || {
+                                    sleep 10
+                                    continue
+                                }
 
-                          STATUS=$(printf '%s' "$RESPONSE" |
-                            grep -o '"status":"[^"]*"' |
-                            head -1 |
-                            cut -d '"' -f4)
+                            STATUS=$(printf '%s' "$RESPONSE" |
+                                grep -o '"status":"[^"]*"' |
+                                head -1 |
+                                cut -d '"' -f4)
 
-                            echo "SonarQube task status: $STATUS"
+                            echo "Analysis status: $STATUS"
 
                             if [ "$STATUS" = "SUCCESS" ]; then
                                 break
                             fi
 
-                            if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELED" ]; then
-                                echo "ERROR: SonarQube analysis task failed"
+                            if [ "$STATUS" = "FAILED" ] ||
+                               [ "$STATUS" = "CANCELED" ]; then
+                                echo "ERROR: SonarQube analysis failed"
                                 exit 1
                             fi
 
@@ -243,33 +246,44 @@ stage('SonarQube Quality Gate') {
                         done
 
                         if [ "$STATUS" != "SUCCESS" ]; then
-                            echo "ERROR: SonarQube analysis timed out"
+                            echo "ERROR: Analysis timed out"
                             exit 1
                         fi
 
-                     ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
-                        grep -o '"analysisId":"[^"]*"' |
-                        head -1 |
-                        cut -d '"' -f4)
+                        # Get the analysis ID
+                        ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
+                            grep -o '"analysisId":"[^"]*"' |
+                            head -1 |
+                            cut -d '"' -f4)
 
                         if [ -z "$ANALYSIS_ID" ]; then
                             echo "ERROR: Analysis ID not found"
                             exit 1
                         fi
 
-                        echo "SonarQube host: $SONAR_HOST_URL"
-                    echo "Quality Gate API URL: $SONAR_HOST_URL/api/qualitygates/project_status"
+                        # Check the Quality Gate
+                        GATE_RESPONSE=$(curl -fsS \
+                            -u "$SONAR_TOKEN:" \
+                            "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
 
-                        echo "SonarQube host: $SONAR_HOST_URL"
+                        GATE=$(printf '%s' "$GATE_RESPONSE" |
+                            grep -o '"status":"[^"]*"' |
+                            head -1 |
+                            cut -d '"' -f4)
 
-curl -sS -L -u "$SONAR_TOKEN:" \
-    -w '\nHTTP_STATUS=%{http_code}\nCONTENT_TYPE=%{content_type}\n' \
-    "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID"
+                        if [ -z "$GATE" ]; then
+                            echo "ERROR: Could not read Quality Gate status"
+                            exit 1
+                        fi
+
+                        echo "SonarQube Quality Gate: $GATE"
 
                         if [ "$GATE" != "OK" ]; then
                             echo "ERROR: Quality Gate failed"
                             exit 1
                         fi
+
+                        echo "Quality Gate passed!"
                     '''
                 }
             }

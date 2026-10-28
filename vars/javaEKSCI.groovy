@@ -257,6 +257,9 @@ stage('SonarQube Quality Gate') {
                             exit 1
                         fi
 
+                        echo "SonarQube host: $SONAR_HOST_URL"
+                    echo "Quality Gate API URL: $SONAR_HOST_URL/api/qualitygates/project_status"
+
                          GATE_RESPONSE=$(curl -fsS -u "$SONAR_TOKEN:" \
                         "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
 

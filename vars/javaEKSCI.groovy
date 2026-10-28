@@ -224,7 +224,7 @@ stage('SonarQube Quality Gate') {
                             }
 
                             STATUS=$(printf '%s' "$RESPONSE" |
-                                python3 -c 'import json,sys; print(json.load(sys.stdin)["task"]["status"])')
+    sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
 
                             echo "SonarQube task status: $STATUS"
 
@@ -246,16 +246,18 @@ stage('SonarQube Quality Gate') {
                         fi
 
                         ANALYSIS_ID=$(printf '%s' "$RESPONSE" |
-                            python3 -c 'import json,sys; print(json.load(sys.stdin)["task"].get("analysisId", ""))')
+    sed -n 's/.*"analysisId":"\([^"]*\)".*/\1/p')
 
                         if [ -z "$ANALYSIS_ID" ]; then
                             echo "ERROR: Analysis ID not found"
                             exit 1
                         fi
 
-                        GATE=$(curl -fsS -u "$SONAR_TOKEN:" \
-                            "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID" |
-                            python3 -c 'import json,sys; print(json.load(sys.stdin)["projectStatus"]["status"])')
+                         GATE_RESPONSE=$(curl -fsS -u "$SONAR_TOKEN:" \
+                    "$SONAR_HOST_URL/api/qualitygates/project_status?analysisId=$ANALYSIS_ID")
+
+                 GATE=$(printf '%s' "$GATE_RESPONSE" |
+                    sed -n 's/.*"projectStatus":{"status":"\([^"]*\)".*/\1/p')
 
                         echo "SonarQube Quality Gate: $GATE"
 

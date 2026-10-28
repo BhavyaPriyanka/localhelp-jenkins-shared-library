@@ -5,9 +5,7 @@ def call(Map configMap) {
     def sonarProjectKey = configMap.get("sonarProjectKey") ?: "localhelp-backend"
 
     pipeline {
-        agent {
-            label 'AGENT-1'
-        }
+        agent any
 
         options {
             timestamps()

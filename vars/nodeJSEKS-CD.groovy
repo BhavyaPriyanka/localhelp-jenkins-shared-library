@@ -8,9 +8,7 @@ def call(Map configMap = [:]) {
         '837206354502.dkr.ecr.us-east-1.amazonaws.com/localhelp-frontend'
 
     pipeline {
-        agent {
-            label 'AGENT-1'
-        }
+        agent any
 
         options {
             timestamps()

@@ -1,258 +1,454 @@
-## Backend-CI pipeline
 
-# Jenkins Setup — Manual Steps After the Website Starts
+# LocalHelp Jenkins Shared Library
 
-This document covers the manual configuration required after the Jenkins web interface becomes available for the Localhelp CI/CD project.
+## Overview
 
-> **Important:** Jenkins master, Jenkins agent, SonarQube, and the EKS bastion are separate roles. Do not connect Jenkins infrastructure to the EKS bastion.
+The LocalHelp Jenkins Shared Library provides reusable CI/CD pipelines for the LocalHelp frontend and backend applications.
 
-## 1. Jenkins Initial Login
+It integrates Jenkins with GitHub, SonarQube, Docker, Amazon ECR, Amazon S3, Amazon RDS, AWS Secrets Manager, and the GitOps deployment workflow using Helm, Argo CD, and Amazon EKS.
 
-1. Open your Jenkins URL, for example:
-   `http://jenkins-master.localhelp.store`
-2. If the initial setup screen appears, run this on the Jenkins master:
+The library supports:
+- Frontend CI and CD
+- Backend CI and CD
+- Automated application builds and testing
+- SonarQube static code analysis and Quality Gate validation
+- Versioned Docker image creation and publishing to Amazon ECR
+- Versioned build artifact storage in Amazon S3
+- RDS endpoint and database credential discovery
+- Database initialization
+- Automated GitOps configuration updates
+- Argo CD deployment handoff
+- Pipeline failure handling and workspace cleanup
 
-   ```bash
-   sudo cat /var/lib/jenkins/secrets/initialAdminPassword
-   ```
+## Architecture
 
-3. Complete the setup wizard and create the Jenkins administrator account.
-4. Install the suggested plugins and sign in.
+Developer Push
+      |
+      v
+GitHub Application Repository
+      |
+      v
+Jenkins Shared Library
+      |
+      +----------------------------+
+      |                            |
+      v                            v
+Frontend CI                  Backend CI
+      |                            |
+      |                            +--> Discover RDS Endpoint
+      |                            +--> Load Secrets Manager Credentials
+      |                            +--> Initialize Database
+      |                            +--> Maven Build and Tests
+      |                            +--> SonarQube Analysis
+      |                            +--> Quality Gate
+      |                            +--> Docker Image
+      |                            +--> ECR and S3
+      |                            +--> Trigger Backend CD
+      |
+      +--> npm ci
+      +--> SonarQube Analysis
+      +--> Quality Gate
+      +--> React Production Build
+      +--> Docker Image
+      +--> ECR and S3
+      +--> Trigger Frontend CD
+                                   |
+                                   v
+                           GitOps Repository
+                                   |
+                                   v
+                                Argo CD
+                                   |
+                                   v
+                              Amazon EKS
+                                   |
+                                   v
+                         LocalHelp Application
 
-If Jenkins is already initialized, sign in using your existing administrator account.
+## Repository Structure
 
-## 2. Install Required Plugins
+The shared library exposes reusable pipeline entry points through the `vars/` directory.
 
-Go to **Manage Jenkins → Plugins** (sometimes called Manage Plugins).
-
-Verify that the required plugins are installed:
-
-- Pipeline
-- Git
-- Credentials Binding
-- SSH Build Agents
-- SonarQube Scanner for Jenkins
-- Docker Pipeline, if required by your pipeline
-- AWS-related plugins only if your pipeline uses them
-
-Install missing plugins and restart Jenkins if requested.
-
-## 3. Configure the Jenkins Agent
-
-Go to **Manage Jenkins → Nodes** and configure the agent with:
-
-- Hostname: `jenkins-agent.localhelp.store`
-- Correct SSH username and private-key credentials
-- Remote root directory
-- Label: `AGENT-1`
-
-### Verify SSH Connectivity
-
-Run these commands on the Jenkins master:
-
-```bash
-getent hosts jenkins-agent.localhelp.store
-nc -vz jenkins-agent.localhelp.store 22
-sudo -u jenkins ssh-keyscan -T 5 jenkins-agent.localhelp.store
+```text
+localhelp-jenkins-shared-library/
+└── vars/
+    ├── nodeJSEKS.groovy
+    ├── nodeJSEKSCD.groovy
+    ├── javaEKSCI.groovy
+    ├── javaEKSCD.groovy
+    └── pipelineDecision.groovy
 ```
 
-Configure an appropriate host-key verification strategy. Prefer verifying the agent's host key instead of permanently disabling verification.
-
-If SSH fails, check the agent's SSH service, security groups, DNS, username, and key.
-
-Restrict SSH port 22 to the appropriate Jenkins master source.
-
-### Install the MySQL Client on the Agent
-
-The `Initialize RDS Database` stage calls the `mysql` command. Install the client on the machine that actually runs the pipeline shell steps.
-
-For Amazon Linux 2023:
-
-```bash
-sudo dnf install -y mariadb105
-which mysql
-mysql --version
-```
-
-If the package is unavailable:
-
-```bash
-dnf search mariadb
-```
-
-Do not install this only on the Jenkins master if builds run on the agent.
-
-## 4. Configure the SonarQube Server
-
-Go to:
-
-**Manage Jenkins → System → SonarQube installations**
-
-Add or verify the following configuration:
-
-- **Name:** `SonarQube`
-- **Server URL:** `http://sonar.localhelp.store`
-- **Authentication token:** Select the appropriate Jenkins token credential if required by the configuration.
-
-Use your actual configured SonarQube URL.
-
-The name must match the pipeline:
-
-```groovy
-withSonarQubeEnv('SonarQube') {
-    // SonarQube analysis
-}
-```
-
-## 5. Create the SonarQube Token Credential
-
-### Generate the token
-
-1. Sign in to SonarQube.
-2. Open **My Account → Security**.
-3. Generate a user token for Jenkins analysis.
-4. Copy the token securely.
-
-### Save the token in Jenkins
-
-Go to:
-
-**Manage Jenkins → Credentials → System → Global credentials → Add Credentials**
-
-Enter:
-
-| Field | Value |
+| Pipeline | Responsibility |
 |---|---|
-| Kind | Secret text |
-| Secret | Generated SonarQube token |
-| ID | `sonarqube-token` |
-| Description | SonarQube Analysis Token |
+| `nodeJSEKS` | Frontend continuous integration |
+| `nodeJSEKSCD` | Frontend GitOps configuration update |
+| `javaEKSCI` | Backend continuous integration |
+| `javaEKSCD` | Backend GitOps configuration update |
+| `pipelineDecision` | Pipeline selection and dispatching |
 
-Click **Create**.
+## 1. Frontend CI — `nodeJSEKS`
 
-The credential ID must match the pipeline's `credentialsId: 'sonarqube-token'`.
+The frontend CI pipeline builds the React.js application, performs code-quality checks, packages the production build, publishes a Docker image to ECR, uploads the ZIP artifact to S3, and triggers frontend CD.
 
-Do not use the SonarQube administrator password as the token.
+### Stage 1: Initialize Version
 
-## 6. Configure the SonarScanner Tool Only If Needed
+- Uses the Jenkins build number as `IMAGE_VERSION`.
+- Loads the application name, AWS region, AWS account ID, and ECR repository from the pipeline configuration.
 
-A pipeline using Maven's Sonar plugin directly normally does not need a separate SonarScanner tool installation.
+### Stage 2: Install Dependencies
 
-If a pipeline invokes `sonar-scanner` or Jenkins' `tool` step:
+- Enters the `frontend` directory.
+- Validates `package.json` and `package-lock.json`.
+- Runs `npm ci` for reproducible dependency installation.
 
-1. Go to **Manage Jenkins → Tools**.
-2. Find **SonarQube Scanner**.
-3. Click **Add SonarQube Scanner**.
-4. Set **Name:** `SonarScanner`.
-5. Select **Install automatically**.
-6. Choose an available version and save.
+### Stage 3: SonarQube Analysis
 
-The name must match the pipeline's tool reference, if present:
+- Uses the configured SonarScanner installation.
+- Connects to the SonarQube server through `withSonarQubeEnv`.
+- Analyzes source code under `frontend/src`.
+- Excludes dependency, build, distribution, and coverage directories.
+- Uses `localhelp-frontend` as the SonarQube project key.
+- Writes the scanner task report to `.scannerwork/report-task.txt`.
 
-```groovy
-def scannerHome = tool 'SonarScanner'
-```
+### Stage 4: SonarQube Quality Gate
 
-Do not add this line unless the pipeline requires it.
+- Reads the SonarQube task report.
+- Polls the Compute Engine task until analysis completes or times out.
+- Retrieves the analysis ID.
+- Queries the SonarQube Quality Gate API.
+- Fails the pipeline if analysis fails, times out, or the Quality Gate status is not `OK`.
 
-## 7. Resolve the RDS Credential Binding
+### Stage 5: Build Frontend Application
 
-The pipeline retrieves the RDS endpoint and master secret from AWS Secrets Manager, but it previously failed because Jenkins could not find credential ID `localhelp-rds-admin`.
+- Runs `npm run build`.
+- Accepts either `dist/` or `build/` as the generated production output.
+- Fails if neither output directory exists.
 
-Search your shared-library repository:
+### Stage 6: Build Frontend Image
 
-```bash
-cd ~/repos/localhelp-jenkins-shared-library
+- Validates the frontend Dockerfile.
+- Builds the Docker image using the configured ECR repository and version tag.
+- Inspects the resulting image.
 
-grep -Rni "localhelp-rds-admin" .
-```
+### Stage 7: Package Frontend Artifact
 
-Choose the fix based on the code:
+- Selects `dist/` or `build/` as the production build directory.
+- Creates a versioned ZIP artifact.
+- Verifies that the ZIP file exists and is not empty.
 
-- If the pipeline genuinely requires a Jenkins username/password credential, create one with ID `localhelp-rds-admin`, using the intended RDS username and password from the approved secret source.
-- If the stage already retrieves the credentials dynamically from Secrets Manager, fix the redundant or incorrect `withCredentials` binding instead of duplicating the database secret.
+Artifact naming:
 
-Never print secret values in Jenkins logs or commit them to Git.
+`frontend-<IMAGE_VERSION>.zip`
 
-## 8. Verify AWS Access on the Agent
+### Stage 8: ECR Login
 
-The pipeline uses AWS CLI commands to describe RDS and retrieve its secret.
+- Authenticates Docker with Amazon ECR using the AWS CLI.
+- Uses the configured AWS region and account ID.
 
-Run these commands on the agent:
+### Stage 9: Push Image to ECR
 
-```bash
-aws --version
-aws sts get-caller-identity
-```
+- Pushes the versioned frontend Docker image.
+- Queries ECR to verify that the image tag exists.
+- Retrieves and logs the image digest.
 
-Prefer an EC2 instance profile/IAM role over long-lived AWS access keys.
+Image naming:
 
-Grant least-privilege permissions for the resources used by the pipeline, including:
+`<AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/<ECR_REPO>:<IMAGE_VERSION>`
 
-- Describe the required RDS instance
-- Retrieve the required Secrets Manager secret
-- Push images to ECR
-- Publish artifacts to S3
+### Stage 10: Upload Artifact to S3
 
-Only grant permissions needed by the actual pipeline.
+- Uploads the versioned ZIP artifact to Amazon S3.
+- Lists the destination path to verify the uploaded artifact is present.
 
-## 9. Verify Required Build Tools
+S3 path:
 
-Run the following commands on the agent to verify tools used by the pipeline:
+`s3://localhelp-frontend-artifacts/frontend/<IMAGE_VERSION>/frontend-<IMAGE_VERSION>.zip`
 
-```bash
-git --version
-java -version
-mvn -version
-docker --version
-aws --version
-mysql --version
-```
+### Stage 11: Trigger Frontend CD
 
-Install only the tools required by your pipeline.
+- Triggers the Jenkins job `frontend-CD`.
+- Passes `IMAGE_VERSION` through the `IMAGE_TAG` parameter.
+- Waits for the downstream job to complete.
+- Propagates downstream failure to the frontend CI result.
 
-If Docker commands run on the agent, confirm that Docker is running and the execution user has the necessary permissions.
+### Stage 12: CI Result and Cleanup
 
-## 10. Run a Validation Build
+- Reports the application, image, version, and build result.
+- Deletes the Jenkins workspace in the `always` post action.
 
-1. Save the Jenkins configuration.
-2. Confirm the agent is online and has label `AGENT-1`.
-3. Run the `backend-ci` job.
-4. Read the console output.
-5. Fix the first failing stage before investigating later stages, because Jenkins skips downstream stages after an earlier failure.
+## 2. Frontend CD — `nodeJSEKSCD`
 
-Expected pipeline stages include:
+The frontend CD pipeline validates the release, discovers the AWS load balancer target group ARN, updates the frontend Helm values in the GitOps repository, and pushes the change.
 
-1. Load DB Credentials
-2. Initialize RDS Database
-3. Install Dependencies
-4. Compile and Unit Tests
-5. SonarQube Analysis
-6. SonarQube Quality Gate
-7. Build Docker Image
-8. Push Image to ECR
-9. Publish Build Artifacts to S3
-10. Trigger CD Pipeline
+### Stage 1: Validate Release
 
-The exact stages depend on your pipeline definition.
+- Requires a non-empty `IMAGE_TAG`.
+- Validates the image tag format.
+- Prepares the image reference for the release.
 
-## Quick Reference
+### Stage 2: Discover Target Group ARN
 
-| Setting | Value |
+- Queries Elastic Load Balancing using the configured target group name `localhelp-dev-frontend`.
+- Uses AWS region `us-east-1`.
+- Validates the returned target group ARN.
+
+### Stage 3: Checkout GitOps Repository
+
+- Checks out the configured GitOps branch.
+- Uses the configured GitHub credentials.
+- Validates the frontend Helm values file.
+- Confirms that the expected frontend ECR repository is configured.
+- Requires exactly one `imageVersion` entry and one `arn` entry.
+
+Default values file:
+
+`apps/frontend/helm/values.yaml`
+
+### Stage 4: Update Frontend GitOps Values
+
+- Uses Python to update the Helm values file.
+- Updates `imageVersion` with the supplied image tag.
+- Updates `arn` with the discovered target group ARN.
+- Validates that the expected image repository, version, and ARN are present.
+
+### Stage 5: Commit and Push GitOps Change
+
+- Configures the Git commit identity.
+- Skips the commit if the values file has no changes.
+- Commits the updated values file.
+- Authenticates the Git push using the configured Jenkins credential.
+- Pushes the change to the configured GitOps branch.
+
+### Post Actions
+
+- Reports whether the GitOps handoff succeeded or failed.
+- Deletes the Jenkins workspace.
+- Leaves application deployment to Argo CD.
+
+## 3. Backend CI — `javaEKSCI`
+
+The backend CI pipeline builds and verifies the Java Spring Boot application, discovers RDS connection information, initializes the database, runs SonarQube checks, publishes the Docker image and build artifacts, and triggers backend CD.
+
+### Stage 1: Checkout
+
+- Checks out the application source.
+- Uses an exact Git tag when available.
+- Otherwise generates a version from the shortened Git commit and Jenkins build number.
+- Normalizes the version for use as a Docker image tag.
+- Validates `pom.xml` and `Dockerfile`.
+- Checks Java, Maven, AWS CLI, and Docker availability.
+
+Version format when no exact Git tag is available:
+
+`sha-<SHORT_COMMIT>-<BUILD_NUMBER>`
+
+### Stage 2: Load DB Credentials
+
+- Discovers the RDS endpoint for `localhelp-dev`.
+- Discovers the AWS-managed master-secret ARN.
+- Retrieves the secret from AWS Secrets Manager.
+- Loads the database username and password into pipeline environment variables.
+- Avoids intentionally printing the retrieved secret values.
+
+### Stage 3: Initialize RDS Database
+
+- Uses the Jenkins credential `localhelp-rds-admin`.
+- Connects to the discovered RDS endpoint on port 3306.
+- Executes the database initialization script:
+
+`backend/src/main/resources/db/init.sql`
+
+### Stage 4: Install Dependencies
+
+- Enters the configured backend directory.
+- Validates the Maven project file.
+- Runs `mvn -B dependency:resolve`.
+
+### Stage 5: Compile and Unit Tests
+
+- Runs `mvn -B clean verify`.
+- Compiles the backend application.
+- Executes the configured tests and Maven verification lifecycle.
+- Stops the pipeline if verification fails.
+
+### Stage 6: SonarQube Analysis
+
+- Connects to the SonarQube installation named `SonarQube`.
+- Runs the Sonar Maven plugin.
+- Uses the configured project key, component name, and build version.
+- Submits the backend source code for static analysis.
+
+### Stage 7: SonarQube Quality Gate
+
+- Reads the scanner report and extracts the Compute Engine task URL.
+- Polls SonarQube until the background analysis succeeds, fails, is canceled, or times out.
+- Retrieves the analysis ID.
+- Queries the Quality Gate API.
+- Fails the build unless the Quality Gate status is `OK`.
+
+### Stage 8: Build Docker Image
+
+- Builds the backend image from the configured application directory.
+- Applies the build version and Git revision as image labels.
+- Tags the image with `BUILD_VERSION`.
+
+### Stage 9: Push Image to ECR
+
+- Confirms the AWS caller identity.
+- Authenticates Docker with Amazon ECR.
+- Pushes the versioned backend image.
+- Logs out of ECR after publishing.
+
+### Stage 10: Publish Build Artifacts to S3
+
+- Locates the packaged application JAR in the Maven `target` directory.
+- Excludes source, Javadoc, and original JAR files from the selection.
+- Uploads the selected JAR to Amazon S3.
+- Uploads `db/init.sql` when the file exists.
+
+Artifact path:
+
+`s3://localhelp-backend-artifacts/backend/<BUILD_VERSION>/<application>.jar`
+
+Database script path:
+
+`s3://localhelp-backend-artifacts/backend/<BUILD_VERSION>/init.sql`
+
+### Stage 11: Trigger CD Pipeline
+
+- Triggers the configured Jenkins job `backend-CD`.
+- Passes `BUILD_VERSION` through the `IMAGE_TAG` parameter.
+- Does not wait for the downstream CD pipeline to finish.
+
+### Post Actions
+
+- Reports CI success or failure.
+- Logs the image reference after a successful build.
+- Prunes unused Docker images.
+- Deletes the Jenkins workspace.
+
+## 4. Backend CD — `javaEKSCD`
+
+The backend CD pipeline updates the backend Helm values file in the GitOps repository with the image tag produced by CI.
+
+### Stage 1: Validate Release
+
+- Requires a non-empty `IMAGE_TAG`.
+- Validates the tag format.
+- Prepares the backend image reference.
+
+### Stage 2: Checkout GitOps Repository
+
+- Checks out the configured GitOps branch.
+- Uses the configured GitHub credential.
+- Validates the backend values file.
+- Confirms that the expected ECR repository is present.
+- Requires exactly one `imageVersion` entry.
+
+Default values file:
+
+`apps/backend/helm/values.yaml`
+
+### Stage 3: Update Backend Image Version
+
+- Updates `imageVersion` in the backend Helm values file.
+- Confirms that the configured ECR repository remains unchanged.
+- Verifies that the expected image tag was written.
+
+### Stage 4: Commit and Push GitOps Change
+
+- Configures the Git commit identity.
+- Displays the values-file diff for troubleshooting.
+- Skips creating a commit when the file already contains the requested image tag.
+- Commits the changed values file.
+- Authenticates and pushes the change to the configured GitOps branch.
+
+### Post Actions
+
+- Reports whether the GitOps handoff succeeded or failed.
+- Deletes the Jenkins workspace.
+- Leaves deployment reconciliation to Argo CD.
+
+## 5. Amazon S3 Artifact Storage
+
+Amazon S3 stores versioned application artifacts separately from the Docker images stored in ECR.
+
+| Application | Artifact | Destination |
+|---|---|---|
+| Frontend | Production build ZIP | `s3://localhelp-frontend-artifacts/frontend/<version>/frontend-<version>.zip` |
+| Backend | Packaged application JAR | `s3://localhelp-backend-artifacts/backend/<version>/<application>.jar` |
+| Backend | Database initialization SQL, when present | `s3://localhelp-backend-artifacts/backend/<version>/init.sql` |
+
+The versioned paths make artifacts easier to identify and retrieve for a particular build.
+
+## 6. SonarQube Quality Controls
+
+Both frontend and backend CI contain separate SonarQube analysis and Quality Gate stages.
+
+The analysis stage submits the source code. The Quality Gate stage waits for analysis completion and checks the resulting status.
+
+A failed or timed-out Quality Gate stops the corresponding CI pipeline before image publication and the downstream CD trigger.
+
+## 7. GitOps Deployment Flow
+
+The CD pipelines update deployment configuration in the GitOps repository instead of directly applying Kubernetes resources.
+
+Frontend CD updates:
+- `imageVersion`
+- Target group `arn`
+
+Backend CD updates:
+- `imageVersion`
+
+After the GitOps commit is pushed, Argo CD is responsible for detecting the desired-state change and reconciling it with the EKS cluster.
+
+## 8. Integrations
+
+| Technology | Purpose |
 |---|---|
-| Jenkins agent label | `AGENT-1` |
-| SonarQube server name | `SonarQube` |
-| SonarQube token credential ID | `sonarqube-token` |
-| Optional SonarScanner tool name | `SonarScanner` |
-| RDS credential ID referenced by pipeline | `localhelp-rds-admin` — verify whether it is needed |
-| MySQL client on Amazon Linux 2023 | `sudo dnf install -y mariadb105` |
-| Jenkins agent SSH port | `22`, restricted to the appropriate source |
-| AWS region | `us-east-1` |
+| Jenkins | CI/CD orchestration |
+| GitHub | Application source and GitOps configuration |
+| Node.js and npm | Frontend dependency installation and build |
+| Java and Maven | Backend dependency resolution, compilation, and tests |
+| SonarQube | Static code analysis and Quality Gate |
+| Docker | Container image build |
+| Amazon ECR | Container image storage |
+| Amazon S3 | Versioned build artifact storage |
+| Amazon RDS | MySQL database |
+| AWS Secrets Manager | RDS master credentials |
+| AWS IAM | Permissions for AWS operations |
+| Helm | Kubernetes application packaging and values |
+| Argo CD | GitOps reconciliation |
+| Amazon EKS | Kubernetes application runtime |
 
-## Security Reminders
+## 9. Security and Reliability
 
-- Never commit passwords, SonarQube tokens, AWS keys, or database secrets to Git.
-- Do not print secret values in Jenkins logs.
-- Prefer IAM roles and least-privilege permissions.
-- Use appropriate network controls and HTTPS where configured.
-- Keep Jenkins master infrastructure independent of the EKS bastion.
+- Store credentials in Jenkins Credentials or AWS Secrets Manager.
+- Avoid logging database passwords, GitHub tokens, or SonarQube tokens.
+- Use least-privilege IAM permissions for AWS operations.
+- Use versioned Docker images and artifacts.
+- Fail CI when Maven verification or SonarQube Quality Gate validation fails.
+- Validate the target group ARN and Helm values before committing GitOps changes.
+- Keep Jenkins controller infrastructure separate from the EKS bastion infrastructure.
+- Review the database initialization script before running it against an existing database.
+- Monitor Argo CD sync and health status after a GitOps update.
+
+## 10. End-to-End Workflow
+
+1. A developer pushes application code to GitHub.
+2. Jenkins checks out the source and generates a version.
+3. CI installs dependencies and builds the application.
+4. SonarQube analyzes the source and validates the Quality Gate.
+5. Jenkins builds and pushes a versioned Docker image to ECR.
+6. CI uploads the versioned build artifact to S3.
+7. CI triggers the corresponding CD Jenkins job with `IMAGE_TAG`.
+8. CD updates the application Helm values in the GitOps repository.
+9. CD commits and pushes the GitOps change.
+10. Argo CD reconciles the desired configuration with Amazon EKS.
+
+## Summary
+
+The LocalHelp Jenkins Shared Library standardizes frontend and backend CI/CD operations.
+
+It provides reproducible builds, automated code-quality validation, versioned Docker image publishing, S3 artifact storage, RDS database initialization, and GitOps-based deployment handoff to Argo CD.
